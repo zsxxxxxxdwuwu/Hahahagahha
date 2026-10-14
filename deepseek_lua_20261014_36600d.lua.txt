@@ -1,0 +1,1447 @@
+// KERS0NE_COMPILER_OUTPUT
+-- dzxzxzx HUB v13.1 — Compact (Kers0ne). Zero funções removidas.
+if type(task)~="table" then task={} end
+if type(task.wait)~="function" then task.wait=function(n)
+    n=tonumber(n)or 0; local rs=game:GetService("RunService")
+    if n<=0 then rs.Heartbeat:Wait() return end
+    local t0=tick(); while tick()-t0<n do rs.Heartbeat:Wait() end
+end end
+if type(task.spawn)~="function" then task.spawn=function(f)
+    if type(f)=="function" then coroutine.resume(coroutine.create(f)) end
+end end
+if type(task.delay)~="function" then task.delay=function(n,f)
+    task.spawn(function() task.wait(n) if type(f)=="function" then f() end end)
+end end
+if type(task.defer)~="function" then task.defer=task.spawn end
+
+local Players=game:GetService("Players")
+local RS=game:GetService("RunService")
+local UIS=game:GetService("UserInputService")
+local RepStorage=game:GetService("ReplicatedStorage")
+local LP=Players.LocalPlayer
+while not LP do task.wait(0.5) LP=Players.LocalPlayer end
+
+local Char,Hum,Root
+local function UpChar(c) Char=c; Hum=c:WaitForChild("Humanoid",8); Root=c:WaitForChild("HumanoidRootPart",8) end
+if LP.Character then UpChar(LP.Character) end
+LP.CharacterAdded:Connect(UpChar)
+
+local conns,passConns={},{}
+local function ClearPassConns() for _,c in ipairs(passConns) do pcall(function()c:Disconnect()end)end; table.clear(passConns) end
+local PassToolTrg=false
+local function HookPass(ch)
+    if not ch then return end ClearPassConns()
+    local function onT(t)
+        if not t:IsA("Tool") then return end
+        table.insert(passConns,t.Activated:Connect(function()
+            if not PassEnabled then return end
+            PassToolTrg=true; task.delay(1.2,function() PassToolTrg=false end)
+        end))
+    end
+    for _,c in ipairs(ch:GetChildren()) do onT(c) end
+    table.insert(passConns,ch.ChildAdded:Connect(onT))
+    local bp=LP:FindFirstChild("Backpack")
+    if bp then for _,c in ipairs(bp:GetChildren()) do onT(c) end
+        table.insert(passConns,bp.ChildAdded:Connect(onT)) end
+end
+task.defer(function() if LP.Character then HookPass(LP.Character) end end)
+LP.CharacterAdded:Connect(function(c) task.wait(0.3) HookPass(c) end)
+
+-- CONFIG
+local VEL_CHUTE_MIN=25 ATRITO=12 VEL_MINIMA=22 CORRECAO_ALINHADO=0.02 CORRECAO_DESALINHADO=0.165
+local REDUCAO_PERTO=0.4 desvioOn=true raioDesvio=14 forcaDesvio=0.5 zonaGoal=12 raioGoal=6
+local freioPosGol=0.90 ATRITO_GOAL=60 TEMPO_PARA_DESLIGAR=16
+local FORCA_CURVA=0.70 DIST_INICIO_CURVA=40 FollowStopDistance=1.8
+local SkillModeEnabled=false SkillSpeed=5 skillPhase=0 skillTimer=0
+local ReachEnabled=false ReachValue=3.5 ReachVisualizerOn=true reachVis=nil ballsTable={}
+local regNames={TPS=true,MPS=true,ESA=true,MRS=true,PRS=true,RBZ=true,SAML=true,BALL=true,ballPart=true,CSF=true,SSS=true,Ball=true,VEF=true,AIFA=true,Ball7=true,Football=true,SoccerBall=true,["Soccer Ball"]=true}
+local EspBallEnabled=true espBalls={}
+local PredictionEnabled=true predFolder=nil predBeams={} PRED_STEPS=40 PRED_DT=0.05 PRED_GRAVITY=Vector3.new(0,-workspace.Gravity,0)
+local PassEnabled=false PassNickFilter="" PassTargetPlayer=nil PassGuiaAtivo=false VEL_PASSE_MIN=10
+local TestBotModel=nil TestBotRoot=nil PASS_FORCA_CURVA=0.70 PASS_DIST_INICIO=35 PASS_RAIO_CHEGADA=5.5
+local PASS_ZONA_FREIO=11 PassContandoParada=0 PassChegou=false PassLeadTime=0.18
+local PassMinTargetScore=18 PassAutoFreeEnabled=true PassFreeMinDistance=11 PassRecheckInterval=0.4 PassLastRecheck=0
+local AntiLagProfile="balanced" frameSkip=0
+local AimbotBlueEnabled=false AimbotGreenEnabled=false AimbotStrength=0.38 AimbotLeadTime=0.12
+local AimbotMinSpeed=8 AimbotMaxSpeed=135 AimbotGoalCache={}
+local GoalkeeperEnabled=false GoalkeeperAutoCatch=false AutoCatchFloatVisible=true
+local GoalkeeperAutoPosition=false GoalkeeperIntercept=false GoalkeeperCatchRange=14
+local GoalkeeperCatchRangeMax=500 GoalkeeperCatchRangeStep=5 GoalkeeperCatchCooldown=0.65
+local GoalkeeperLastCatch=0 GoalkeeperBallLead=0.16 GoalkeeperLineOffset=3.5
+local GoalkeeperHitboxEnabled=false GoalkeeperHitboxPart=nil GoalkeeperRemote=nil
+pcall(function() GoalkeeperRemote=RepStorage:FindFirstChild("CatchBall",true) end)
+local VelDinamicaEnabled=false tempoUltimoCalculo=0
+
+-- COORDS
+local coordenadas={}
+local function SalvarCoord(t)
+    local s="" for n,c in pairs(t) do s=s..string.format("%s|%.2f,%.2f,%.2f\n",n,c.x,c.y,c.z) end
+    pcall(function() writefile("ball_pro_coords.txt",s) end)
+end
+local function CarregarCoord()
+    local ok,ct=pcall(function() return readfile("ball_pro_coords.txt") end)
+    if not ok or not ct then return {} end
+    local t={} for l in ct:gmatch("[^\n]+") do
+        local n,xy=l:match("^(.+)|(.+)$")
+        if n and xy then local x,y,z=xy:match("([^,]+),([^,]+),([^,]+)")
+            if x and y and z then t[n]={x=tonumber(x),y=tonumber(y),z=tonumber(z)} end end
+    end return t
+end
+coordenadas=CarregarCoord()
+
+local function NomeParAlternativo(nome)
+    if not nome or nome=="" then return nil end
+    local lo=nome:lower()
+    local pares={{"esquerdo","direito"},{"left","right"},{"esq","dir"},{"e","d"},{"l","r"},{"norte","sul"},{"cima","baixo"},{"top","bottom"},{"up","down"}}
+    for _,p in ipairs(pares) do
+        if lo:find(p[1],1,true) then return nome:gsub("(?i)"..p[1],p[2]) end
+        if lo:find(p[2],1,true) then return nome:gsub("(?i)"..p[2],p[1]) end
+    end return nil
+end
+local function TrocarAnguloCoord()
+    if not estadoSistema.coordenadaSelecionada then Notify("Nenhuma coordenada","warn") return end
+    local a=NomeParAlternativo(estadoSistema.coordenadaSelecionada)
+    if a and coordenadas[a] then
+        estadoSistema.coordenadaSelecionada=a
+        local c=coordenadas[a]
+        estadoSistema.alvoAtual=Vector3.new(c.x,c.y,c.z)
+        Notify("Ângulo → "..a,"ok")
+    else Notify("Par não encontrado","warn") end
+end
+
+local estadoSistema={ativo=false,guiaAtivo=false,cruzou=false,contandoParada=0,alvoAtual=nil,coordenadaSelecionada=nil}
+local AutoFollowEnabled=false
+
+-- BALL DETECT
+local function getBallPart(o)
+    if not o then return nil end
+    if o:IsA("BasePart") or o:IsA("UnionOperation") then return o end
+    if o:IsA("Model") then return o.PrimaryPart or o:FindFirstChild("MainPart") or o:FindFirstChild("Ball") or o:FindFirstChild("TPS") or o:FindFirstChildWhichIsA("BasePart",true) end
+    return nil
+end
+local function IsRealBall(o)
+    if not o or not o.Parent or not o:IsA("BasePart") then return false end
+    if Char and o:IsDescendantOf(Char) then return false end
+    local n=o.Name:lower()
+    if n=="head" or n=="torso" then return false end
+    if n:find("stadium",1,true) or n:find("map",1,true) or n:find("goal",1,true) or n:find("net",1,true) or n:find("grass",1,true) or n:find("field",1,true) or n:find("pitch",1,true) then return false end
+    local m=o:FindFirstAncestorOfClass("Model")
+    if m and m:FindFirstChildOfClass("Humanoid") then return false end
+    local s=o.Size
+    if s.X<0.35 or s.X>10 or s.Y<0.35 or s.Y>10 or s.Z<0.35 or s.Z>10 then return false end
+    local mn=m and m.Name:lower() or "" local pn=o.Parent and o.Parent.Name:lower() or ""
+    if regNames[o.Name] or regNames[n] or regNames[m and m.Name or ""] or regNames[mn] or regNames[o.Parent and o.Parent.Name or ""] or regNames[pn] then return true end
+    local function lk(x) return x=="tps" or x=="ball" or x=="bola" or x=="soccer ball" or x=="soccer_ball" or x:find("soccerball",1,true) or x:find("football",1,true) or (x:find("soccer",1,true) and x:find("ball",1,true)) or x:find("ballpart",1,true)~=nil end
+    if lk(n) or lk(mn) or lk(pn) then return true end
+    local mesh=o:FindFirstChildOfClass("SpecialMesh")
+    if mesh and not o.Anchored then local mx=math.max(s.X,s.Y,s.Z) local mi=math.min(s.X,s.Y,s.Z) if mx/math.max(mi,0.01)<=2.5 then return true end end
+    if o:IsA("MeshPart") and not o.Anchored then local mx=math.max(s.X,s.Y,s.Z) local mi=math.min(s.X,s.Y,s.Z) if mx/math.max(mi,0.01)<=2.5 then return true end end
+    return false
+end
+
+local BallCache={} ActiveBall=nil ActiveBallLastSeen=0 BallReacquireGrace=1.75 BallScanInterval=0.08 BallLastScan=0
+local function RefreshBallCache(force)
+    local now=os.clock() if not force and now-BallLastScan<BallScanInterval then return end BallLastScan=now
+    local seen={}
+    for _,o in ipairs(workspace:GetDescendants()) do
+        if IsRealBall(o) then
+            seen[o]=true BallCache[o]=BallCache[o] or {lastSeen=now,lastPos=o.Position,lastSpeed=0}
+            local d=BallCache[o] d.lastSeen=now d.lastPos=o.Position d.lastSpeed=o.AssemblyLinearVelocity.Magnitude
+        end
+    end
+    for o,d in pairs(BallCache) do if not seen[o] and (not o.Parent or now-(d.lastSeen or 0)>2.5) then BallCache[o]=nil end end
+end
+local function GetAllBalls(incSlow)
+    RefreshBallCache(false) local list={} local now=os.clock()
+    for b,d in pairs(BallCache) do
+        if b and b.Parent and IsRealBall(b) then
+            local sp=b.AssemblyLinearVelocity.Magnitude
+            local di=Root and (b.Position-Root.Position).Magnitude or math.huge
+            if incSlow or sp>=5 or b==ActiveBall or now-(d.lastSeen or 0)<BallReacquireGrace then
+                table.insert(list,{ball=b,speed=sp,dist=di,namePriority=(b.Name:lower()=="tps" or b.Name:lower()=="ball" or b.Name:lower()=="bola") and 3 or 1})
+            end
+        end
+    end
+    table.sort(list,function(a,b)
+        if a.ball==ActiveBall then return true end if b.ball==ActiveBall then return false end
+        return (a.namePriority*1000+a.speed*5-math.min(a.dist,300))>(b.namePriority*1000+b.speed*5-math.min(b.dist,300))
+    end)
+    return list
+end
+table.insert(conns,workspace.DescendantAdded:Connect(function(o)
+    if o:IsA("BasePart") then task.defer(function() if IsRealBall(o) then BallCache[o]={lastSeen=os.clock(),lastPos=o.Position,lastSpeed=o.AssemblyLinearVelocity.Magnitude} end end) end
+end))
+table.insert(conns,workspace.DescendantRemoving:Connect(function(o)
+    BallCache[o]=nil if ActiveBall==o then ActiveBall=nil ActiveBallLastSeen=0 end
+end))
+local function BuscarBola()
+    local c=GetAllBalls(true) local b=c[1] and c[1].ball or nil
+    if b then ActiveBall=b ActiveBallLastSeen=os.clock() return b end
+    if ActiveBall and ActiveBall.Parent and os.clock()-ActiveBallLastSeen<=BallReacquireGrace then return ActiveBall end
+    ActiveBall=nil return nil
+end
+local function GetGuidanceBalls()
+    local l={} for _,i in ipairs(GetAllBalls(true)) do if i.ball and i.ball.Parent then table.insert(l,i.ball) end end return l
+end
+local GuidanceBallIdentity=nil
+local function ResetGuidance(nb)
+    if GuidanceBallIdentity==nb then return end
+    if GuidanceBallIdentity~=nil then
+        estadoSistema.guiaAtivo=false estadoSistema.cruzou=false estadoSistema.contandoParada=0
+        PassGuiaAtivo=false PassChegou=false PassContandoParada=0 PassToolTrg=false
+    end GuidanceBallIdentity=nb
+end
+
+-- FÍSICA
+local cdToque=0
+local function CalcularDesvio(b,dir)
+    if not desvioOn then return dir end
+    local mp,md=nil,math.huge local bp=b.Position
+    for _,p in ipairs(Players:GetPlayers()) do
+        if p~=LP and p.Character then
+            local h=p.Character:FindFirstChild("HumanoidRootPart")
+            if h then local d=(h.Position-bp).Magnitude
+                if d<=raioDesvio and d<md then
+                    local pp=Vector3.new(h.Position.X-bp.X,0,h.Position.Z-bp.Z)
+                    if pp.Magnitude>0.1 and dir:Dot(pp.Unit)>0.3 then mp=h md=d end
+                end end
+        end
+    end
+    if not mp then return dir end
+    local pp=Vector3.new(mp.Position.X-bp.X,0,mp.Position.Z-bp.Z).Unit
+    local perp=Vector3.new(-dir.Z,0,dir.X)
+    local ld=perp:Dot(pp)>0 and -perp or perp
+    local u=math.clamp(1-(md/raioDesvio),0,1)
+    local dd=dir:Lerp(ld,forcaDesvio*u)
+    return dd.Magnitude>0.01 and dd.Unit or dir
+end
+local function TocarBola(b)
+    if not Char then return end
+    local ps={Char:FindFirstChild("Left Leg") or Char:FindFirstChild("LeftFoot"),
+              Char:FindFirstChild("Right Leg") or Char:FindFirstChild("RightFoot"),
+              Char:FindFirstChild("LeftHand") or Char:FindFirstChild("Left Arm"),
+              Char:FindFirstChild("RightHand") or Char:FindFirstChild("Right Arm"),Root}
+    for _,p in ipairs(ps) do if p and b:IsA("BasePart") then pcall(function() firetouchinterest(p,b,0) firetouchinterest(p,b,1) end) end end
+end
+local function GuideBallToPoint(b,tp,lt,st,mn,mx)
+    if not b or not b.Parent or not tp then return end
+    local v=b.AssemblyLinearVelocity local vh=Vector3.new(v.X,0,v.Z) local sp=vh.Magnitude
+    if sp<(mn or 5) then return end
+    local pr=b.Position+vh*(lt or 0.12)
+    local ft=Vector3.new(tp.X,pr.Y,tp.Z)
+    local tt=Vector3.new(ft.X-pr.X,0,ft.Z-pr.Z)
+    if tt.Magnitude<0.1 then return end
+    local cd=vh.Unit local td=tt.Unit
+    local dt=math.clamp(cd:Dot(td),-1,1)
+    local cor=math.clamp((st or 0.35)*(1-dt*0.30),0.035,0.48)
+    local fd=cd:Lerp(td,cor) if fd.Magnitude<0.01 then fd=td end fd=fd.Unit
+    local ds=math.clamp(sp+(tt.Magnitude>35 and 0.9 or 0),mn or 5,mx or 135)
+    b.AssemblyLinearVelocity=Vector3.new(fd.X*ds,v.Y,fd.Z*ds)
+    b.AssemblyAngularVelocity=Vector3.zero
+end
+local function GuiarBola(b,pg,dt)
+    if not estadoSistema.ativo or not estadoSistema.alvoAtual then return end
+    local v=b.AssemblyLinearVelocity local mg=Vector3.new(v.X,0,v.Z).Magnitude
+    if not estadoSistema.guiaAtivo and not estadoSistema.cruzou and mg>=VEL_CHUTE_MIN then
+        estadoSistema.guiaAtivo=true estadoSistema.contandoParada=0
+        Notify(string.format("Chute! vel: %.0f",mg),"info")
+    end
+    if not estadoSistema.guiaAtivo then return end
+    local dg=Vector3.new(pg.X-b.Position.X,0,pg.Z-b.Position.Z) local di=dg.Magnitude
+    if estadoSistema.cruzou or di<=raioGoal then
+        estadoSistema.cruzou=true
+        local nv=b.AssemblyLinearVelocity*freioPosGol
+        if nv.Magnitude<3 then
+            b.AssemblyLinearVelocity=Vector3.zero b.AssemblyAngularVelocity=Vector3.zero
+            estadoSistema.contandoParada=estadoSistema.contandoParada+1
+            if estadoSistema.contandoParada>TEMPO_PARA_DESLIGAR then
+                estadoSistema.guiaAtivo=false estadoSistema.cruzou=false estadoSistema.contandoParada=0 estadoSistema.ativo=false
+                Notify("Alvo alcançado","ok")
+            end return
+        end b.AssemblyLinearVelocity=nv return
+    end
+    local vh=Vector3.new(v.X,0,v.Z)
+    local ap=vh.Magnitude>1 and vh.Unit:Dot(dg.Unit)>0.4
+    if di<=zonaGoal and ap then
+        local nm=math.max(vh.Magnitude-ATRITO_GOAL*dt,0)
+        if nm*dt*60<di then
+            b.AssemblyLinearVelocity=Vector3.zero b.AssemblyAngularVelocity=Vector3.zero
+            estadoSistema.contandoParada=estadoSistema.contandoParada+1
+            if estadoSistema.contandoParada>TEMPO_PARA_DESLIGAR then
+                estadoSistema.guiaAtivo=false estadoSistema.cruzou=false estadoSistema.contandoParada=0 estadoSistema.ativo=false
+            end return
+        end
+        b.AssemblyLinearVelocity=Vector3.new(vh.Unit.X*nm,v.Y,vh.Unit.Z*nm) return
+    end
+    local es=FORCA_CURVA
+    if di<DIST_INICIO_CURVA then es=es*(0.78+math.clamp(1-di/DIST_INICIO_CURVA,0,1)*0.30) end
+    if di<22 then es=es*0.85 end
+    GuideBallToPoint(b,pg,0.12,es,VEL_MINIMA,135)
+    if os.clock()-cdToque>0.15 then cdToque=os.clock() TocarBola(b) end
+end
+
+-- VEL DINÂMICA
+local function VelParaCoord(o,d)
+    local di=(d-o).Magnitude if di<1 then return VEL_CHUTE_MIN end
+    local vb=math.clamp(VEL_CHUTE_MIN+di*0.8,VEL_CHUTE_MIN,120)
+    return vb+(math.random()-0.5)*1.5
+end
+local function VelParaPlayer(o,d)
+    local di=(d-o).Magnitude if di<1 then return VEL_PASSE_MIN end
+    local vb=math.clamp(VEL_PASSE_MIN+di*0.6,VEL_PASSE_MIN,90)
+    return vb+(math.random()-0.5)*1.2
+end
+local function AplicVelDin(b,vt)
+    if not b or not b:IsDescendantOf(workspace) then return end
+    if (tick()-tempoUltimoCalculo)<0.15 then return end
+    local va=b.AssemblyLinearVelocity.Magnitude
+    if va<vt*0.7 and va>VEL_CHUTE_MIN then
+        b.AssemblyLinearVelocity=b.AssemblyLinearVelocity.Unit*vt tempoUltimoCalculo=tick()
+    end
+end
+
+-- SKILL
+local function GetValidBallFollow()
+    if not Root or not Root.Parent then return nil end return BuscarBola()
+end
+local function DoSkill(dt)
+    if not SkillModeEnabled or not Root or not Root.Parent then return end
+    local cl=GetValidBallFollow() if not cl or not cl.Parent then return end
+    if (cl.Position-Root.Position).Magnitude>12 then return end
+    skillTimer=skillTimer+(dt or 0.016)*SkillSpeed
+    if skillTimer>=1 then skillTimer=0 skillPhase=(skillPhase+1)%4 end
+    local t=skillTimer local off
+    if skillPhase==0 then off=Root.CFrame.LookVector*math.sin(t*math.pi)*2
+    elseif skillPhase==1 then off=Root.CFrame.RightVector*math.sin(t*math.pi)*2
+    elseif skillPhase==2 then off=-Root.CFrame.RightVector*math.sin(t*math.pi)*2
+    else off=-Root.CFrame.LookVector*math.sin(t*math.pi)*2 end
+    local tp=Root.Position+off+Vector3.new(0,-1.5,0)
+    cl.CFrame=CFrame.new(cl.Position:Lerp(tp,0.3),cl.Position)
+    cl.AssemblyLinearVelocity=Vector3.zero cl.AssemblyAngularVelocity=Vector3.zero
+end
+
+-- REACH
+local function InitBallsTable()
+    ballsTable={} RefreshBallCache(true)
+    for b,_ in pairs(BallCache) do if b and b.Parent and IsRealBall(b) then ballsTable[b]=true end end
+end
+InitBallsTable()
+table.insert(conns,workspace.DescendantAdded:Connect(function(d)
+    if d:IsA("BasePart") then task.defer(function() if IsRealBall(d) then ballsTable[d]=true end end) end
+end))
+table.insert(conns,workspace.DescendantRemoving:Connect(function(d) ballsTable[d]=nil end))
+local function UpdateReachVis()
+    if not Root or not Root.Parent then return end
+    if not ReachEnabled then if reachVis and reachVis.Parent then reachVis.Transparency=1 end return end
+    if not reachVis or not reachVis.Parent then
+        reachVis=Instance.new("Part") reachVis.Name="DzxzxzxVisualizer"
+        reachVis.Shape=Enum.PartType.Ball reachVis.Anchored=true reachVis.CanCollide=false
+        reachVis.Massless=true reachVis.Material=Enum.Material.ForceField
+        reachVis.Color=Color3.fromRGB(0,150,255) reachVis.Parent=workspace
+    end
+    reachVis.Size=Vector3.new(ReachValue*2,ReachValue*2,ReachValue*2)
+    reachVis.CFrame=Root.CFrame
+    reachVis.Transparency=ReachVisualizerOn and 0.35 or 1
+end
+local function DoReach()
+    if not ReachEnabled or not Char or not Root or not Root.Parent then return end
+    local bp={Root}
+    for _,n in ipairs({"Torso","UpperTorso","LowerTorso","Head","Right Arm","Left Arm","Right Leg","Left Leg","RightHand","LeftHand","RightFoot","LeftFoot","RightUpperArm","LeftUpperArm","RightUpperLeg","LeftUpperLeg"}) do
+        local p=Char:FindFirstChild(n) if p then table.insert(bp,p) end
+    end
+    local mds=ReachValue*ReachValue
+    for b,_ in pairs(ballsTable) do
+        if b and b.Parent then
+            local dx=Root.Position.X-b.Position.X local dy=Root.Position.Y-b.Position.Y local dz=Root.Position.Z-b.Position.Z
+            if dx*dx+dy*dy+dz*dz<=mds then
+                for _,p in ipairs(bp) do pcall(function() firetouchinterest(p,b,0) firetouchinterest(p,b,1) end) end
+                pcall(function() firetouchinterest(Root,b,0) firetouchinterest(Root,b,1) firetouchinterest(Root,b,0) firetouchinterest(Root,b,1) end)
+            end
+        end
+    end
+end
+
+-- ESP
+local function ClearEsp(b)
+    local d=espBalls[b] if d then pcall(function() if d.bb then d.bb:Destroy() end end) pcall(function() if d.hl then d.hl:Destroy() end end) espBalls[b]=nil end
+end
+local function ClearAllEsp() for b,_ in pairs(espBalls) do ClearEsp(b) end espBalls={} end
+local function UpdateEsp()
+    if not EspBallEnabled then ClearAllEsp() return end
+    if not Root or not Root.Parent then return end
+    local seen={}
+    for b,_ in pairs(ballsTable) do
+        if b and b.Parent then
+            seen[b]=true
+            if not espBalls[b] then
+                pcall(function()
+                    local bb=Instance.new("BillboardGui") bb.Name="DzEspBall" bb.Adornee=b
+                    bb.Size=UDim2.new(0,90,0,40) bb.StudsOffset=Vector3.new(0,3,0) bb.AlwaysOnTop=true
+                    bb.Parent=LP:WaitForChild("PlayerGui")
+                    local nl=Instance.new("TextLabel") nl.Size=UDim2.new(1,0,0.5,0) nl.BackgroundTransparency=1
+                    nl.Text=b.Name nl.TextColor3=Color3.fromRGB(255,50,50) nl.TextStrokeTransparency=0.3
+                    nl.TextStrokeColor3=Color3.fromRGB(0,0,0) nl.TextScaled=true nl.Font=Enum.Font.GothamBold nl.Parent=bb
+                    local dl=Instance.new("TextLabel") dl.Name="Dist" dl.Size=UDim2.new(1,0,0.5,0)
+                    dl.Position=UDim2.new(0,0,0.5,0) dl.BackgroundTransparency=1 dl.Text="0m"
+                    dl.TextColor3=Color3.fromRGB(255,255,100) dl.TextStrokeTransparency=0.3
+                    dl.TextStrokeColor3=Color3.fromRGB(0,0,0) dl.TextScaled=true dl.Font=Enum.Font.Gotham dl.Parent=bb
+                    local hl=Instance.new("Highlight") hl.Adornee=b hl.FillColor=Color3.fromRGB(255,40,40)
+                    hl.FillTransparency=0.55 hl.OutlineColor=Color3.fromRGB(255,200,80)
+                    hl.OutlineTransparency=0.2 hl.Parent=b
+                    espBalls[b]={bb=bb,dist=dl,hl=hl}
+                end)
+            end
+            local d=espBalls[b]
+            if d and d.dist then d.dist.Text=string.format("%.0fm",(b.Position-Root.Position).Magnitude) end
+        end
+    end
+    for b,_ in pairs(espBalls) do if not seen[b] or not b.Parent then ClearEsp(b) end end
+end
+
+-- PREDICTION
+local function ClearPred()
+    for _,b in ipairs(predBeams) do pcall(function() b:Destroy() end) end
+    predBeams={} if predFolder and predFolder.Parent then predFolder:Destroy() end predFolder=nil
+end
+local function UpdatePred(b)
+    if not PredictionEnabled or StealthMode then ClearPred() return end
+    if not b or not b.Parent then ClearPred() return end
+    local v=b.AssemblyLinearVelocity local sp=v.Magnitude
+    if sp<8 then ClearPred() return end
+    if not predFolder or not predFolder.Parent then
+        predFolder=Instance.new("Folder") predFolder.Name="DzPredictionBeam" predFolder.Parent=workspace
+    end
+    local pts={} local p=b.Position local vv=v
+    for i=1,PRED_STEPS do
+        vv=vv+PRED_GRAVITY*PRED_DT vv=vv*(1-0.012*PRED_DT*60) p=p+vv*PRED_DT
+        if p.Y<=(b.Position.Y-15) and vv.Y<0 then table.insert(pts,Vector3.new(p.X,b.Position.Y-1,p.Z)) break end
+        table.insert(pts,p)
+    end
+    if #pts<2 then ClearPred() return end
+    local nd=#pts-1
+    while #predBeams>nd do local e=table.remove(predBeams) pcall(function() e:Destroy() end) end
+    for i=1,nd do
+        local p0,p1=pts[i],pts[i+1] local bd=predBeams[i]
+        if not bd or not bd.part0 or not bd.part0.Parent then
+            local a0=Instance.new("Part") a0.Name="PredA0" a0.Anchored=true a0.CanCollide=false a0.CanQuery=false a0.CanTouch=false a0.Transparency=1 a0.Size=Vector3.new(0.2,0.2,0.2) a0.Parent=predFolder
+            local a1=Instance.new("Part") a1.Name="PredA1" a1.Anchored=true a1.CanCollide=false a1.CanQuery=false a1.CanTouch=false a1.Transparency=1 a1.Size=Vector3.new(0.2,0.2,0.2) a1.Parent=predFolder
+            local at0=Instance.new("Attachment",a0) local at1=Instance.new("Attachment",a1)
+            local bm=Instance.new("Beam") bm.Attachment0=at0 bm.Attachment1=at1 bm.Width0=0.35 bm.Width1=0.15
+            bm.FaceCamera=true bm.LightEmission=0.6 bm.LightInfluence=0
+            bm.Color=ColorSequence.new({ColorSequenceKeypoint.new(0,Color3.fromRGB(255,60,60)),ColorSequenceKeypoint.new(1,Color3.fromRGB(255,200,50))})
+            bm.Transparency=NumberSequence.new({NumberSequenceKeypoint.new(0,0.15),NumberSequenceKeypoint.new(1,0.55)})
+            bm.Parent=a0 bd={part0=a0,part1=a1,beam=bm} predBeams[i]=bd
+        end
+        bd.part0.CFrame=CFrame.new(p0) bd.part1.CFrame=CFrame.new(p1)
+    end
+end
+
+-- PASSE
+local function AllyName(p)
+    if p=="TEST_BOT" then return "robo kkkkkk" end
+    if typeof(p)=="Instance" and p:IsA("Player") then return p.Name end
+    return tostring(p)
+end
+local function GetPlayerRoot(p)
+    if p=="TEST_BOT" or (type(p)=="string" and p:lower():find("robo")) then
+        if TestBotRoot and TestBotRoot.Parent then return TestBotRoot end return nil end
+    if typeof(p)=="Instance" and p:IsA("Model") and p==TestBotModel then return TestBotRoot end
+    if not p or typeof(p)~="Instance" then return nil end
+    if p:IsA("Player") then if not p.Character then return nil end return p.Character:FindFirstChild("HumanoidRootPart") end
+    return nil
+end
+local function DestroyBot()
+    if TestBotModel and TestBotModel.Parent then TestBotModel:Destroy() end TestBotModel=nil TestBotRoot=nil
+end
+local function SpawnBot()
+    DestroyBot()
+    if not Root then Notify("Sem personagem","warn") return end
+    local m=Instance.new("Model") m.Name="robo kkkkkk"
+    local function pt(n,s,cf,c)
+        local p=Instance.new("Part") p.Name=n p.Size=s p.CFrame=cf p.Anchored=true p.CanCollide=false p.Material=Enum.Material.SmoothPlastic p.Color=c p.Parent=m return p
+    end
+    local base=Root.CFrame*CFrame.new(0,0,-18)
+    local r=pt("HumanoidRootPart",Vector3.new(2,2,1),base*CFrame.new(0,3,0),Color3.fromRGB(40,40,45))
+    pt("Torso",Vector3.new(2,2,1),base*CFrame.new(0,3,0),Color3.fromRGB(60,60,70))
+    local h=pt("Head",Vector3.new(1.2,1.2,1.2),base*CFrame.new(0,4.6,0),Color3.fromRGB(90,90,100))
+    pt("Left Arm",Vector3.new(1,2,1),base*CFrame.new(-1.5,3,0),Color3.fromRGB(50,50,55))
+    pt("Right Arm",Vector3.new(1,2,1),base*CFrame.new(1.5,3,0),Color3.fromRGB(50,50,55))
+    pt("Left Leg",Vector3.new(1,2,1),base*CFrame.new(-0.5,1,0),Color3.fromRGB(35,35,40))
+    pt("Right Leg",Vector3.new(1,2,1),base*CFrame.new(0.5,1,0),Color3.fromRGB(35,35,40))
+    local f=Instance.new("Decal") f.Texture="rbxasset://textures/face.png" f.Face=Enum.NormalId.Front f.Parent=h
+    local bb=Instance.new("BillboardGui") bb.Size=UDim2.new(0,140,0,30) bb.StudsOffset=Vector3.new(0,2.2,0) bb.AlwaysOnTop=true bb.Parent=h
+    local l=Instance.new("TextLabel") l.Size=UDim2.new(1,0,1,0) l.BackgroundTransparency=1 l.Text="robo kkkkkk"
+    l.TextColor3=Color3.fromRGB(80,255,120) l.TextStrokeTransparency=0.4 l.Font=Enum.Font.GothamBold l.TextScaled=true l.Parent=bb
+    local hl=Instance.new("Highlight") hl.FillColor=Color3.fromRGB(0,200,100) hl.FillTransparency=0.7 hl.OutlineColor=Color3.fromRGB(80,255,120) hl.Parent=m
+    m.PrimaryPart=r m.Parent=workspace TestBotModel=m TestBotRoot=r
+    Notify("Robô spawnado","ok")
+end
+local function GetTeamKey(p)
+    if not p or typeof(p)~="Instance" or not p:IsA("Player") then return nil end
+    if p.Team then return "TEAM:"..p.Team:GetFullName() end
+    if p.TeamColor then return "COLOR:"..tostring(p.TeamColor) end
+    for _,a in ipairs({"Team","TeamName","Side"}) do
+        local v=p:GetAttribute(a) if v~=nil and tostring(v)~="" then return "ATTR:"..tostring(v):lower() end
+    end
+    local st=p:FindFirstChild("leaderstats")
+    if st then for _,n in ipairs({"Team","TeamName","Side"}) do
+        local v=st:FindFirstChild(n)
+        if v and (v:IsA("StringValue") or v:IsA("IntValue") or v:IsA("NumberValue")) then return "STAT:"..tostring(v.Value):lower() end
+    end end return nil
+end
+local function IsSameTeam(p)
+    if not p or p==LP then return false end
+    local m,t=GetTeamKey(LP),GetTeamKey(p)
+    if m and t then return m==t end
+    if not m and not t then return true end return false
+end
+local function GetTeamSide(p)
+    if not p then return nil end
+    local pc={}
+    if p.Team then table.insert(pc,p.Team.Name) end
+    if p.TeamColor then table.insert(pc,tostring(p.TeamColor)) end
+    for _,a in ipairs({"Team","TeamName","Side"}) do local v=p:GetAttribute(a) if v~=nil then table.insert(pc,tostring(v)) end end
+    local st=p:FindFirstChild("leaderstats")
+    if st then for _,a in ipairs({"Team","TeamName","Side"}) do local v=st:FindFirstChild(a) if v then table.insert(pc,tostring(v.Value)) end end end
+    local tx=table.concat(pc," "):lower()
+    if tx:find("blue",1,true) or tx:find("azul",1,true) then return "Blue" end
+    if tx:find("green",1,true) or tx:find("verde",1,true) then return "Green" end return nil
+end
+local function GetLocalSide() return GetTeamSide(LP) end
+local function FindByNick(pt)
+    if not pt or pt=="" then return nil,"vazio" end
+    local q=pt:lower() local ms={}
+    if TestBotRoot and TestBotRoot.Parent then
+        local bn="robo kkkkkk"
+        if bn:sub(1,#q)==q or bn:find(q,1,true) then table.insert(ms,"TEST_BOT") end
+    end
+    for _,p in ipairs(Players:GetPlayers()) do
+        if p~=LP and IsSameTeam(p) then
+            local n=p.Name:lower() local d=(p.DisplayName or ""):lower()
+            if n:sub(1,#q)==q or n:find(q,1,true) or d:sub(1,#q)==q or d:find(q,1,true) then table.insert(ms,p) end
+        end
+    end
+    if #ms==0 then for _,p in ipairs(Players:GetPlayers()) do
+        if p~=LP then local n=p.Name:lower() local d=(p.DisplayName or ""):lower()
+            if n:sub(1,#q)==q or n:find(q,1,true) or d:sub(1,#q)==q or d:find(q,1,true) then table.insert(ms,p) end
+        end
+    end end
+    if #ms==1 then return ms[1],"ok" end
+    if #ms==0 then return nil,"nenhum" end return nil,"multiplos",ms
+end
+local function ScoreFree(p,bp)
+    local r=GetPlayerRoot(p) if not r then return -math.huge end
+    local ps=r.Position local db=(ps-bp).Magnitude
+    if db<4 or db>120 then return -math.huge end
+    local ne=math.huge
+    for _,o in ipairs(Players:GetPlayers()) do
+        if o~=LP and o~=p and not IsSameTeam(o) then
+            local or_=GetPlayerRoot(o) if or_ then local d=(or_.Position-ps).Magnitude if d<ne then ne=d end end
+        end
+    end
+    if ne==math.huge then ne=50 end
+    if PassAutoFreeEnabled and ne<PassFreeMinDistance then return -math.huge end
+    local ds=1-math.abs(db-25)/50
+    local tv=r.AssemblyLinearVelocity local fs=tv.Magnitude>1 and 4 or 0
+    return ne*2.2+ds*15+fs
+end
+local function GetBestAlly(bp)
+    if PassNickFilter and PassNickFilter~="" then
+        local p,s=FindByNick(PassNickFilter) if p then return p end if s=="multiplos" then return nil end
+    end
+    local best,bs=nil,-math.huge
+    for _,p in ipairs(Players:GetPlayers()) do
+        if p~=LP and IsSameTeam(p) then
+            local sc=ScoreFree(p,bp) if sc>=PassMinTargetScore and sc>bs then bs=sc best=p end
+        end
+    end return best
+end
+local function GetSmartTarget(bp)
+    local t=GetBestAlly(bp) if not t then return nil end
+    if not GetPlayerRoot(t) then return nil end
+    local sc=ScoreFree(t,bp) if sc==-math.huge or sc<PassMinTargetScore then return nil end return t
+end
+local function TentarPasse(b)
+    if PassGuiaAtivo or not b then return end
+    PassGuiaAtivo=true PassChegou=false PassContandoParada=0 PassToolTrg=false
+    if not (PassTargetPlayer and GetPlayerRoot(PassTargetPlayer)) then PassTargetPlayer=GetSmartTarget(b.Position) end
+    if PassTargetPlayer then Notify("Passe → "..AllyName(PassTargetPlayer),"ok")
+    else Notify("Nenhum aliado","warn") PassGuiaAtivo=false end
+end
+local function FinalizarPasse(m)
+    PassGuiaAtivo=false PassChegou=false PassContandoParada=0
+    if not PassNickFilter or PassNickFilter=="" then PassTargetPlayer=nil end
+    Notify(m or "Passe entregue","ok")
+end
+local function GuiarPasse(b,dt)
+    if not PassEnabled or not b then return end
+    local v=b.AssemblyLinearVelocity local mg=Vector3.new(v.X,0,v.Z).Magnitude
+    if not PassGuiaAtivo then if PassToolTrg or mg>=VEL_PASSE_MIN then TentarPasse(b) end end
+    if not PassGuiaAtivo then return end
+    if (not PassNickFilter or PassNickFilter=="") and os.clock()-PassLastRecheck>=PassRecheckInterval then
+        PassLastRecheck=os.clock()
+        local fr=GetSmartTarget(b.Position)
+        if fr and fr~=PassTargetPlayer then PassTargetPlayer=fr Notify("Redirecionado → "..AllyName(fr),"info")
+        elseif not fr and PassTargetPlayer then
+            local cs=ScoreFree(PassTargetPlayer,b.Position)
+            if cs==-math.huge or cs<PassMinTargetScore then
+                local rp=GetSmartTarget(b.Position)
+                if rp then PassTargetPlayer=rp Notify("Novo alvo: "..AllyName(rp),"info") end
+            end
+        end
+    end
+    local r=GetPlayerRoot(PassTargetPlayer) if not r then FinalizarPasse("Alvo sumiu") return end
+    local tv=r.AssemblyLinearVelocity local pt=r.Position+tv*PassLeadTime
+    local dv=Vector3.new(pt.X-b.Position.X,0,pt.Z-b.Position.Z) local di=dv.Magnitude
+    local vh=Vector3.new(v.X,0,v.Z)
+    if PassChegou or di<=PASS_RAIO_CHEGADA then
+        PassChegou=true
+        local nv=b.AssemblyLinearVelocity*freioPosGol
+        if nv.Magnitude<3 then
+            b.AssemblyLinearVelocity=Vector3.zero b.AssemblyAngularVelocity=Vector3.zero
+            PassContandoParada=PassContandoParada+1
+            if PassContandoParada>12 then FinalizarPasse("Passe chegou em "..AllyName(PassTargetPlayer)) end return
+        end b.AssemblyLinearVelocity=nv return
+    end
+    local ap=vh.Magnitude>1 and dv.Magnitude>0.1 and vh.Unit:Dot(dv.Unit)>0.35
+    if di<=PASS_ZONA_FREIO and ap then
+        local nm=math.max(vh.Magnitude-ATRITO_GOAL*dt,0)
+        if nm*dt*60<di then
+            b.AssemblyLinearVelocity=Vector3.zero b.AssemblyAngularVelocity=Vector3.zero
+            PassContandoParada=PassContandoParada+1
+            if PassContandoParada>12 then FinalizarPasse("Passe chegou em "..AllyName(PassTargetPlayer)) end return
+        end
+        b.AssemblyLinearVelocity=Vector3.new(vh.Unit.X*nm,v.Y,vh.Unit.Z*nm) return
+    end
+    local nm=math.max(mg-ATRITO*dt,VEL_MINIMA*0.85)
+    local da=vh.Magnitude>1 and vh.Unit or dv.Unit
+    local al=da:Dot(dv.Unit) local de=1-math.max(al,-1)
+    local fa=(CORRECAO_ALINHADO+de*CORRECAO_DESALINHADO)*PASS_FORCA_CURVA
+    if di<PASS_DIST_INICIO then local t=math.clamp(1-di/PASS_DIST_INICIO,0,1) fa=fa*(0.7+t*0.6) end
+    if di<22 then fa=fa*REDUCAO_PERTO end
+    local df=da:Lerp(dv.Unit,math.clamp(fa,0,0.45))
+    if df.Magnitude>0.01 then df=df.Unit else df=dv.Unit end
+    b.AssemblyLinearVelocity=Vector3.new(df.X*nm,v.Y,df.Z*nm) b.AssemblyAngularVelocity=Vector3.zero
+end
+
+-- GOLEIRO
+local function FindMapFolder()
+    for _,n in ipairs({"WorkspaceStadiumMap1","Stadium","StadiumMap","Map","WorkspaceMap"}) do
+        local o=workspace:FindFirstChild(n) if o then return o end
+    end return workspace
+end
+local function FindGoalIn(cont,bp)
+    if not cont then return nil end
+    local pref={Union2=true,Goal=true,GoalPart=true,GoalPost=true,Net=true,Target=true,Goalkeeper=true,GoalArea=true}
+    local cs={}
+    for _,o in ipairs(cont:GetDescendants()) do
+        if o:IsA("BasePart") then
+            local n=o.Name:lower()
+            local lk=pref[o.Name] or n:find("goal",1,true) or n:find("gol",1,true) or n:find("net",1,true) or n:find("target",1,true)
+            if lk and o.Size.Magnitude>0.5 then table.insert(cs,o) end
+        end
+    end
+    if #cs==0 then return nil end
+    if bp then local best,bd=nil,-math.huge for _,p in ipairs(cs) do local d=(p.Position-bp).Magnitude if d>bd then bd=d best=p end end return best end
+    return cs[1]
+end
+local function GetAimbotGoal(side,bp)
+    local now=os.clock() local c=AimbotGoalCache[side]
+    if c and now-c.time<0.35 and c.part and c.part.Parent then return c.part.Position end
+    local map=FindMapFolder()
+    local ns=side=="Blue" and {"Team1","TeamBlue","Blue","BlueTeam"} or {"Team2","TeamGreen","Green","GreenTeam"}
+    local bp_=nil
+    for _,n in ipairs(ns) do local f=map:FindFirstChild(n,true) if f then local p=FindGoalIn(f,bp) if p then bp_=p break end end end
+    if not bp_ then
+        local fb={}
+        for _,o in ipairs(map:GetDescendants()) do
+            if o:IsA("BasePart") then
+                local n=o.Name:lower()
+                local isS=side=="Blue" and (n:find("blue",1,true) or n:find("azul",1,true)) or side=="Green" and (n:find("green",1,true) or n:find("verde",1,true))
+                if isS and (n:find("goal",1,true) or n:find("gol",1,true) or n:find("net",1,true)) then table.insert(fb,o) end
+            end
+        end
+        local bd=-math.huge for _,o in ipairs(fb) do local d=(o.Position-bp).Magnitude if d>bd then bd=d bp_=o end end
+    end
+    if bp_ then AimbotGoalCache[side]={part=bp_,time=now} return bp_.Position end return nil
+end
+local function ApplyAimbot(b,side,dt)
+    if not b or not b.Parent then return end
+    local gp=GetAimbotGoal(side,b.Position) if not gp then return end
+    local v=b.AssemblyLinearVelocity local vh=Vector3.new(v.X,0,v.Z)
+    if vh.Magnitude<0.05 then b.AssemblyLinearVelocity=Vector3.new(0,v.Y,0) end
+    GuideBallToPoint(b,gp,AimbotLeadTime,AimbotStrength,AimbotMinSpeed,AimbotMaxSpeed)
+end
+local function TryGKCatch(b)
+    if not GoalkeeperAutoCatch or not b or not b.Parent or not Root or not Root.Parent then return end
+    if not GoalkeeperRemote or not GoalkeeperRemote.Parent then pcall(function() GoalkeeperRemote=RepStorage:FindFirstChild("CatchBall",true) end) end
+    local now=os.clock() if now-GoalkeeperLastCatch<GoalkeeperCatchCooldown then return end
+    local bv=b.AssemblyLinearVelocity local ld=math.clamp(GoalkeeperBallLead,0.05,0.45)
+    local pp=b.Position+bv*ld
+    local cd=(b.Position-Root.Position).Magnitude local pd=(pp-Root.Position).Magnitude
+    local di=math.min(cd,pd) if di>GoalkeeperCatchRange then return end
+    local s=false
+    if GoalkeeperRemote and GoalkeeperRemote.Parent then
+        s=pcall(function()
+            if GoalkeeperRemote:IsA("RemoteEvent") then GoalkeeperRemote:FireServer(b)
+            elseif GoalkeeperRemote:IsA("RemoteFunction") then GoalkeeperRemote:InvokeServer(b) end
+        end)
+    end
+    if not s then pcall(function() TocarBola(b) end) end
+    GoalkeeperLastCatch=now
+end
+local function GetOwnGoal()
+    local s=GetLocalSide() if s then return GetAimbotGoal(s,Root and Root.Position) end
+    local bl=GetAimbotGoal("Blue",Root and Root.Position) local gr=GetAimbotGoal("Green",Root and Root.Position)
+    if not bl then return gr end if not gr then return bl end if not Root then return bl end
+    return ((bl-Root.Position).Magnitude<(gr-Root.Position).Magnitude) and bl or gr
+end
+local function DoGK(b,dt)
+    if not GoalkeeperEnabled and not GoalkeeperAutoCatch and not GoalkeeperHitboxEnabled then
+        if GoalkeeperHitboxPart and GoalkeeperHitboxPart.Parent then GoalkeeperHitboxPart:Destroy() end GoalkeeperHitboxPart=nil return
+    end
+    if not Root or not Root.Parent or not b then return end
+    local og=GetOwnGoal() if not og then return end
+    local bv=b.AssemblyLinearVelocity local bvh=Vector3.new(bv.X,0,bv.Z)
+    local tg=Vector3.new(og.X-b.Position.X,0,og.Z-b.Position.Z)
+    if GoalkeeperIntercept and bvh.Magnitude>5 and tg.Magnitude>0.1 then
+        local tw=bvh.Unit:Dot(tg.Unit)
+        if tw>0.55 then
+            local pr=b.Position+bvh*GoalkeeperBallLead
+            local ic=Vector3.new(pr.X,Root.Position.Y,pr.Z)
+            local dl=ic-Root.Position local mv=Vector3.new(dl.X,0,dl.Z)
+            if mv.Magnitude>1.0 and mv.Magnitude<80 then Hum:Move(mv.Unit,false) end
+        end
+    end
+    if GoalkeeperAutoPosition then
+        local gc=Vector3.new(og.X,Root.Position.Y,og.Z)
+        local df=b.Position:Lerp(gc,0.62)
+        local fl=Vector3.new(df.X,Root.Position.Y,df.Z)
+        local dl=fl-Root.Position
+        if dl.Magnitude>GoalkeeperLineOffset then Hum:Move(dl.Unit,false) end
+    end
+    TryGKCatch(b)
+    if GoalkeeperHitboxEnabled then
+        if not GoalkeeperHitboxPart or not GoalkeeperHitboxPart.Parent then
+            GoalkeeperHitboxPart=Instance.new("Part") GoalkeeperHitboxPart.Name="DzGoalkeeperHitbox"
+            GoalkeeperHitboxPart.Shape=Enum.PartType.Ball GoalkeeperHitboxPart.Anchored=true
+            GoalkeeperHitboxPart.CanCollide=false GoalkeeperHitboxPart.CanTouch=false
+            GoalkeeperHitboxPart.CanQuery=false GoalkeeperHitboxPart.Material=Enum.Material.ForceField
+            GoalkeeperHitboxPart.Color=Color3.fromRGB(0,200,255) GoalkeeperHitboxPart.Transparency=0.72
+            GoalkeeperHitboxPart.Parent=workspace
+        end
+        local sz=GoalkeeperCatchRange*2
+        GoalkeeperHitboxPart.Size=Vector3.new(sz,sz,sz)
+        GoalkeeperHitboxPart.Position=Root.Position
+    elseif GoalkeeperHitboxPart and GoalkeeperHitboxPart.Parent then
+        GoalkeeperHitboxPart:Destroy() GoalkeeperHitboxPart=nil
+    end
+end
+
+-- FOLLOW
+local followVel=Vector3.zero
+local function IsManualInput()
+    return UIS:IsKeyDown(Enum.KeyCode.W) or UIS:IsKeyDown(Enum.KeyCode.A) or UIS:IsKeyDown(Enum.KeyCode.S) or UIS:IsKeyDown(Enum.KeyCode.D)
+end
+local function DoFollow(b)
+    if not AutoFollowEnabled or IsManualInput() or not b then followVel=Vector3.zero return end
+    if not Root or not Root.Parent or not Hum or not Hum.Parent then return end
+    local bp=b.Position local bv=b.AssemblyLinearVelocity
+    local hv=Vector3.new(bv.X,0,bv.Z) local sp=hv.Magnitude
+    local ld=math.clamp(0.08+sp*0.0025,0.08,0.32)
+    local tp=bp+hv*ld
+    local dl=tp-Root.Position local md=Vector3.new(dl.X,0,dl.Z) local mg=md.Magnitude
+    if mg>FollowStopDistance and mg<180 then
+        local ds=md.Unit
+        local al=math.clamp(0.18+math.min(mg/40,0.18),0.18,0.36)
+        followVel=followVel:Lerp(ds,al)
+        if followVel.Magnitude>0.01 then Hum:Move(followVel.Unit,false) end
+        local lt=Vector3.new(tp.X,Root.Position.Y,tp.Z)
+        local fl=lt-Root.Position
+        if fl.Magnitude>0.1 then Root.CFrame=Root.CFrame:Lerp(CFrame.new(Root.Position,lt),0.22) end
+    else followVel=Vector3.zero Hum:Move(Vector3.zero,false) end
+end
+
+-- ANTI-LAG
+local ANTI_LAG={quality={ballScan=1,reach=1,esp=1,pred=1,follow=1},balanced={ballScan=1,reach=1,esp=1,pred=1,follow=1},performance={ballScan=2,reach=2,esp=2,pred=2,follow=2}}
+local function AplicAntiLag(p)
+    AntiLagProfile=p or "balanced" frameSkip=0
+    Notify("Anti-lag: "..AntiLagProfile,"info")
+end
+
+-- KILL
+local function DesativarTudo()
+    estadoSistema.ativo=false estadoSistema.guiaAtivo=false
+    AutoFollowEnabled=false SkillModeEnabled=false ReachEnabled=false PassEnabled=false PassGuiaAtivo=false PassTargetPlayer=nil
+    GoalkeeperEnabled=false GoalkeeperAutoCatch=false GoalkeeperAutoPosition=false GoalkeeperIntercept=false GoalkeeperHitboxEnabled=false
+    if GoalkeeperHitboxPart and GoalkeeperHitboxPart.Parent then GoalkeeperHitboxPart:Destroy() end GoalkeeperHitboxPart=nil
+    DestroyBot()
+    if reachVis and reachVis.Parent then reachVis:Destroy() reachVis=nil end
+    ClearAllEsp() ClearPred() ClearPassConns()
+    for _,c in ipairs(conns) do pcall(function() c:Disconnect() end) end conns={}
+    if ScreenGui and ScreenGui.Parent then ScreenGui:Destroy() end
+    Notify("Script desativado","warn")
+end
+
+-- LOOPS
+local bolaJaDet=false
+table.insert(conns,RS.Heartbeat:Connect(function(dt)
+    if not Root or not Root.Parent then return end
+    frameSkip=frameSkip+1
+    local bola=BuscarBola() ResetGuidance(bola)
+    local allBalls=GetGuidanceBalls()
+    for _,i in ipairs(GetAllBalls(true)) do if i.ball and i.ball.Parent then ballsTable[i.ball]=true end end
+    if bola and not bolaJaDet then bolaJaDet=true Notify("BOLA: "..tostring(bola.Name),"ok")
+    elseif not bola and bolaJaDet then bolaJaDet=false Notify("Bola perdida","warn") end
+    if bola and GuidanceBallIdentity==bola then
+        if estadoSistema.ativo and estadoSistema.alvoAtual and estadoSistema.guiaAtivo then
+            GuiarBola(bola,estadoSistema.alvoAtual,dt)
+            if VelDinamicaEnabled and estadoSistema.guiaAtivo then AplicVelDin(bola,VelParaCoord(bola.Position,estadoSistema.alvoAtual)) end
+        end
+        if PassEnabled then
+            GuiarPasse(bola,dt)
+            if VelDinamicaEnabled and PassGuiaAtivo and PassTargetPlayer then
+                local tr=GetPlayerRoot(PassTargetPlayer)
+                if tr then AplicVelDin(bola,VelParaPlayer(bola.Position,tr.Position)) end
+            end
+        end
+    end
+    for _,b in ipairs(allBalls) do
+        if b and b.Parent then
+            if AimbotBlueEnabled then ApplyAimbot(b,"Blue",dt) end
+            if AimbotGreenEnabled then ApplyAimbot(b,"Green",dt) end
+        end
+    end
+    if bola and bola.Parent then DoGK(bola,dt) end
+    DoReach() UpdateReachVis() UpdateEsp() UpdatePred(bola)
+end))
+table.insert(conns,RS.PreRender:Connect(function(dt)
+    if not Root or not Root.Parent then return end
+    local b=GetValidBallFollow() DoFollow(b) DoSkill(dt)
+end))
+
+-- UI
+local ScreenGui=Instance.new("ScreenGui")
+ScreenGui.Name="dzxzxzxHubUI" ScreenGui.ResetOnSpawn=false ScreenGui.DisplayOrder=999
+ScreenGui.ZIndexBehavior=Enum.ZIndexBehavior.Sibling
+pcall(function() ScreenGui.Parent=game:GetService("CoreGui") end)
+if not ScreenGui.Parent then ScreenGui.Parent=LP:WaitForChild("PlayerGui") end
+
+local CF=Color3.fromRGB(10,10,10) CV=Color3.fromRGB(255,45,45) CT=Color3.fromRGB(255,255,255)
+local CTE=Color3.fromRGB(18,18,18) CP=Color3.fromRGB(16,16,16)
+
+local StealthMode=false
+local stealthSaved={panelVisible=true,espEnabled=true,reachVis=true}
+local STEALTH_KEY=Enum.KeyCode.RightControl FOLLOW_KEY=Enum.KeyCode.G waitingKeybind=nil
+local btnKeyFollow,btnKeyStealth,lblStealth
+local function KeyName(k) if not k then return "?" end return tostring(k):gsub("Enum.KeyCode.","") end
+local floatButtonsVisible={master=true,sistema=true,follow=true,skill=true,reach=true,pass=true}
+local Notify=function(m) print("[dzxzxzx] "..tostring(m)) end
+
+local toastHolder=Instance.new("Frame")
+toastHolder.Size=UDim2.new(0,180,0,140) toastHolder.Position=UDim2.new(0.5,-90,0,10)
+toastHolder.BackgroundTransparency=1 toastHolder.ZIndex=200 toastHolder.Parent=ScreenGui
+local tLay=Instance.new("UIListLayout") tLay.Parent=toastHolder tLay.SortOrder=Enum.SortOrder.LayoutOrder
+tLay.Padding=UDim.new(0,4) tLay.HorizontalAlignment=Enum.HorizontalAlignment.Center
+
+Notify=function(m,k)
+    if StealthMode then print("[dzxzxzx] "..tostring(m)) return end
+    if not ScreenGui or not ScreenGui.Parent then print("[dzxzxzx] "..tostring(m)) return end
+    k=k or "info" local ac=CV
+    if k=="ok" then ac=Color3.fromRGB(60,220,100)
+    elseif k=="warn" then ac=Color3.fromRGB(255,180,40)
+    elseif k=="err" then ac=Color3.fromRGB(255,60,60) end
+    local t=Instance.new("Frame") t.Size=UDim2.new(1,0,0,22) t.BackgroundColor3=CP
+    t.BackgroundTransparency=0.85 t.BorderSizePixel=0 t.ZIndex=201 t.Parent=toastHolder
+    Instance.new("UICorner",t).CornerRadius=UDim.new(0,6)
+    local s=Instance.new("UIStroke",t) s.Color=ac s.Thickness=1 s.Transparency=0.35
+    local l=Instance.new("TextLabel") l.Size=UDim2.new(1,-12,1,0) l.Position=UDim2.new(0,6,0,0)
+    l.BackgroundTransparency=1 l.Text=tostring(m) l.TextColor3=CT l.TextSize=11
+    l.Font=Enum.Font.GothamBold l.TextXAlignment=Enum.TextXAlignment.Left
+    l.TextTruncate=Enum.TextTruncate.AtEnd l.ZIndex=202 l.Parent=t
+    task.spawn(function() task.wait(2.4) if t and t.Parent then t:Destroy() end end)
+    print("[dzxzxzx] "..tostring(m))
+end
+
+local function MakeDrag(g)
+    local dr,di,ds,sp
+    g.InputBegan:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseButton1 or i.UserInputType==Enum.UserInputType.Touch then
+            dr=true ds=i.Position sp=g.Position
+            i.Changed:Connect(function() if i.UserInputState==Enum.UserInputState.End then dr=false end end)
+        end
+    end)
+    g.InputChanged:Connect(function(i)
+        if i.UserInputType==Enum.UserInputType.MouseMovement or i.UserInputType==Enum.UserInputType.Touch then di=i end
+    end)
+    UIS.InputChanged:Connect(function(i)
+        if i==di and dr then
+            local d=i.Position-ds g.Position=UDim2.new(sp.X.Scale,sp.X.Offset+d.X,sp.Y.Scale,sp.Y.Offset+d.Y)
+        end
+    end)
+end
+
+local btnMaster=Instance.new("ImageButton")
+btnMaster.Size=UDim2.new(0,54,0,54) btnMaster.Position=UDim2.new(0,16,0.42,0)
+btnMaster.BackgroundColor3=Color3.fromRGB(0,0,0) btnMaster.Image="rbxassetid://137662590342001"
+btnMaster.ScaleType=Enum.ScaleType.Crop btnMaster.BorderSizePixel=0 btnMaster.Parent=ScreenGui
+btnMaster.AutoButtonColor=false Instance.new("UICorner",btnMaster).CornerRadius=UDim.new(0,12)
+local sMaster=Instance.new("UIStroke",btnMaster) sMaster.Color=CV sMaster.Thickness=1.5 MakeDrag(btnMaster)
+
+local function MakeFloat(txt,pos,col)
+    local b=Instance.new("TextButton") b.Size=UDim2.new(0,54,0,54) b.Position=pos
+    b.BackgroundColor3=CP b.Text=txt b.TextSize=12 b.Font=Enum.Font.GothamBold
+    b.TextColor3=CT b.BorderSizePixel=0 b.Parent=ScreenGui b.AutoButtonColor=false
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,12)
+    local s=Instance.new("UIStroke",b) s.Color=col or Color3.fromRGB(160,160,160) s.Thickness=1.5 MakeDrag(b)
+    return b,s
+end
+local btnFloatToggle,sFloat=MakeFloat("OFF",UDim2.new(0,16,0.52,0),CV)
+local btnFloatFollow,sFollow=MakeFloat("F:OFF",UDim2.new(0,16,0.62,0))
+local btnFloatSkill,sSkill=MakeFloat("SK:OFF",UDim2.new(0,16,0.72,0))
+local btnFloatReach,sReach=MakeFloat("R:OFF",UDim2.new(0,16,0.82,0))
+local btnFloatAutoCatch,sAC=MakeFloat("AC:OFF",UDim2.new(0,16,0.32,0),CV)
+local btnFloatPass,sPass=MakeFloat("P:OFF",UDim2.new(0,16,0.92,0))
+
+local panel=Instance.new("Frame")
+panel.Size=UDim2.new(0,250,0,380) panel.Position=UDim2.new(0,80,0.5,-190)
+panel.BackgroundColor3=CF panel.BorderSizePixel=0 panel.ClipsDescendants=true
+panel.Parent=ScreenGui panel.Visible=true
+Instance.new("UICorner",panel).CornerRadius=UDim.new(0,12)
+local sPanel=Instance.new("UIStroke",panel) sPanel.Color=CV sPanel.Thickness=1.8
+
+local btnHide=Instance.new("TextButton")
+btnHide.Size=UDim2.new(0,32,0,32) btnHide.Position=UDim2.new(1,-40,0,8)
+btnHide.BackgroundColor3=CP btnHide.BackgroundTransparency=0.12 btnHide.Text="×"
+btnHide.TextSize=20 btnHide.Font=Enum.Font.GothamBold btnHide.TextColor3=CT
+btnHide.BorderSizePixel=0 btnHide.ZIndex=20 btnHide.Parent=panel btnHide.AutoButtonColor=false
+Instance.new("UICorner",btnHide).CornerRadius=UDim.new(0,8)
+local sHide=Instance.new("UIStroke",btnHide) sHide.Color=CV sHide.Thickness=1.2
+
+local header=Instance.new("TextButton")
+header.Size=UDim2.new(1,0,0,36) header.BackgroundColor3=CV
+header.Text="dzxzxzx HUB v13.1  •  PRIVADO" header.TextSize=12 header.Font=Enum.Font.GothamBold
+header.TextColor3=CTE header.BorderSizePixel=0 header.ZIndex=3 header.Parent=panel header.AutoButtonColor=false
+Instance.new("UICorner",header).CornerRadius=UDim.new(0,12) MakeDrag(panel)
+
+local tabBar=Instance.new("Frame")
+tabBar.Size=UDim2.new(1,-8,0,34) tabBar.Position=UDim2.new(0,4,0,40)
+tabBar.BackgroundTransparency=1 tabBar.ZIndex=5 tabBar.Parent=panel
+
+local tabCampo=Instance.new("TextButton")
+tabCampo.Size=UDim2.new(0.5,-3,1,0) tabCampo.BackgroundColor3=CV tabCampo.Text="⚽ CAMPO"
+tabCampo.Font=Enum.Font.GothamBold tabCampo.TextSize=11 tabCampo.TextColor3=CTE
+tabCampo.BorderSizePixel=0 tabCampo.ZIndex=6 tabCampo.Parent=tabBar
+Instance.new("UICorner",tabCampo).CornerRadius=UDim.new(0,7)
+
+local tabGK=Instance.new("TextButton")
+tabGK.Size=UDim2.new(0.5,-3,1,0) tabGK.Position=UDim2.new(0.5,3,0,0)
+tabGK.BackgroundColor3=CP tabGK.Text="🧤 GOLEIRO" tabGK.Font=Enum.Font.GothamBold
+tabGK.TextSize=11 tabGK.TextColor3=CT tabGK.BorderSizePixel=0 tabGK.ZIndex=6 tabGK.Parent=tabBar
+Instance.new("UICorner",tabGK).CornerRadius=UDim.new(0,7)
+
+local scroll=Instance.new("ScrollingFrame")
+scroll.Size=UDim2.new(1,-8,1,-82) scroll.Position=UDim2.new(0,4,0,76)
+scroll.BackgroundTransparency=1 scroll.BorderSizePixel=0 scroll.ScrollBarThickness=4
+scroll.ScrollBarImageColor3=CV scroll.ZIndex=3 scroll.CanvasSize=UDim2.new(0,0,0,520) scroll.Parent=panel
+local content=Instance.new("Frame") content.Size=UDim2.new(1,-4,0,520)
+content.BackgroundTransparency=1 content.Parent=scroll
+
+local gScroll=Instance.new("ScrollingFrame")
+gScroll.Size=UDim2.new(1,-8,1,-82) gScroll.Position=UDim2.new(0,4,0,76)
+gScroll.BackgroundTransparency=1 gScroll.BorderSizePixel=0 gScroll.ScrollBarThickness=4
+gScroll.ScrollBarImageColor3=CV gScroll.ZIndex=3 gScroll.CanvasSize=UDim2.new(0,0,0,900)
+gScroll.Visible=false gScroll.Parent=panel
+local gContent=Instance.new("Frame") gContent.Size=UDim2.new(1,-4,0,900)
+gContent.BackgroundTransparency=1 gContent.Parent=gScroll
+
+local function SetTab(t)
+    if t=="goleiro" then
+        tabGK.BackgroundColor3=CV tabGK.TextColor3=CTE tabCampo.BackgroundColor3=CP tabCampo.TextColor3=CT
+        scroll.Visible=false gScroll.Visible=true
+    else
+        tabCampo.BackgroundColor3=CV tabCampo.TextColor3=CTE tabGK.BackgroundColor3=CP tabGK.TextColor3=CT
+        gScroll.Visible=false scroll.Visible=true
+    end
+end
+tabCampo.MouseButton1Click:Connect(function() SetTab("campo") end)
+tabGK.MouseButton1Click:Connect(function() SetTab("goleiro") end)
+
+-- CAMPO
+local y=4
+local btnToggleSystem=Instance.new("TextButton")
+btnToggleSystem.Size=UDim2.new(1,-8,0,34) btnToggleSystem.Position=UDim2.new(0,4,0,y)
+btnToggleSystem.BackgroundColor3=CP btnToggleSystem.Text="⊘ SISTEMA DESLIGADO"
+btnToggleSystem.TextSize=12 btnToggleSystem.Font=Enum.Font.GothamBold btnToggleSystem.TextColor3=CT
+btnToggleSystem.BorderSizePixel=0 btnToggleSystem.Parent=content btnToggleSystem.AutoButtonColor=false
+Instance.new("UICorner",btnToggleSystem).CornerRadius=UDim.new(0,6)
+Instance.new("UIStroke",btnToggleSystem).Color=CV y=y+40
+
+local function AtualVisualSys()
+    if estadoSistema.ativo then
+        btnFloatToggle.BackgroundColor3=CV btnFloatToggle.Text="ON" btnFloatToggle.TextColor3=CTE
+        btnToggleSystem.BackgroundColor3=CV btnToggleSystem.Text="🎯 SISTEMA LIGADO" btnToggleSystem.TextColor3=CTE
+    else
+        btnFloatToggle.BackgroundColor3=CP btnFloatToggle.Text="OFF" btnFloatToggle.TextColor3=CT
+        btnToggleSystem.BackgroundColor3=CP btnToggleSystem.Text="⊘ SISTEMA DESLIGADO" btnToggleSystem.TextColor3=CT
+    end
+end
+local function ToggleSys()
+    estadoSistema.ativo=not estadoSistema.ativo
+    if not estadoSistema.ativo then estadoSistema.guiaAtivo=false estadoSistema.cruzou=false estadoSistema.contandoParada=0 Notify("Sistema OFF","info")
+    else Notify("Sistema ON","ok") end
+    AtualVisualSys()
+end
+btnFloatToggle.MouseButton1Click:Connect(ToggleSys)
+btnToggleSystem.MouseButton1Click:Connect(ToggleSys)
+
+local lblSel=Instance.new("TextLabel")
+lblSel.Text="Nenhuma coordenada selecionada" lblSel.TextSize=11 lblSel.Font=Enum.Font.GothamSemibold
+lblSel.TextColor3=CV lblSel.BackgroundTransparency=1 lblSel.Size=UDim2.new(1,-8,0,20)
+lblSel.Position=UDim2.new(0,4,0,y) lblSel.TextXAlignment=Enum.TextXAlignment.Left lblSel.Parent=content y=y+24
+
+local tbox=Instance.new("TextBox")
+tbox.PlaceholderText="Nome da coordenada" tbox.Size=UDim2.new(1,-8,0,30) tbox.Position=UDim2.new(0,4,0,y)
+tbox.BackgroundColor3=CP tbox.TextColor3=CT tbox.PlaceholderColor3=Color3.fromRGB(140,140,140)
+tbox.TextSize=12 tbox.Font=Enum.Font.Gotham tbox.BorderSizePixel=0 tbox.ClearTextOnFocus=false tbox.Parent=content
+Instance.new("UICorner",tbox).CornerRadius=UDim.new(0,6) Instance.new("UIStroke",tbox).Color=CV y=y+36
+
+local btnSave=Instance.new("TextButton")
+btnSave.Size=UDim2.new(0.55,-6,0,30) btnSave.Position=UDim2.new(0,4,0,y)
+btnSave.BackgroundColor3=CV btnSave.Text="SALVAR COORD" btnSave.TextSize=11
+btnSave.Font=Enum.Font.GothamBold btnSave.TextColor3=CTE btnSave.BorderSizePixel=0 btnSave.Parent=content
+btnSave.AutoButtonColor=false Instance.new("UICorner",btnSave).CornerRadius=UDim.new(0,6)
+
+local btnClear=Instance.new("TextButton")
+btnClear.Size=UDim2.new(0.45,-6,0,30) btnClear.Position=UDim2.new(0.55,2,0,y)
+btnClear.BackgroundColor3=CP btnClear.Text="LIMPAR" btnClear.TextSize=11
+btnClear.Font=Enum.Font.GothamBold btnClear.TextColor3=CV btnClear.BorderSizePixel=0 btnClear.Parent=content
+btnClear.AutoButtonColor=false Instance.new("UICorner",btnClear).CornerRadius=UDim.new(0,6)
+Instance.new("UIStroke",btnClear).Color=CV y=y+38
+
+btnClear.MouseButton1Click:Connect(function() tbox.Text="" end)
+
+local listaFrame=Instance.new("Frame")
+local scrollList
+local function AtualLista()
+    if not scrollList then return end
+    for _,c in ipairs(scrollList:GetChildren()) do if c:IsA("Frame") then c:Destroy() end end
+    local cnt=0
+    for nome,co in pairs(coordenadas) do
+        cnt=cnt+1
+        local ct=Instance.new("Frame") ct.Size=UDim2.new(1,-4,0,30) ct.BackgroundTransparency=1 ct.Parent=scrollList
+        local it=Instance.new("TextButton") it.Size=UDim2.new(1,-34,0,30) it.BackgroundColor3=Color3.fromRGB(25,25,25)
+        it.Text="  "..nome it.TextSize=11 it.Font=Enum.Font.Gotham it.TextColor3=CT
+        it.TextXAlignment=Enum.TextXAlignment.Left it.BorderSizePixel=0 it.Parent=ct it.AutoButtonColor=false
+        Instance.new("UICorner",it).CornerRadius=UDim.new(0,5)
+        it.MouseButton1Click:Connect(function()
+            estadoSistema.alvoAtual=Vector3.new(co.x,co.y,co.z) estadoSistema.coordenadaSelecionada=nome
+            estadoSistema.guiaAtivo=false estadoSistema.cruzou=false lblSel.Text="✓ "..nome Notify("Alvo: "..nome,"ok")
+        end)
+        local bd=Instance.new("TextButton") bd.Size=UDim2.new(0,30,0,30) bd.Position=UDim2.new(1,-30,0,0)
+        bd.BackgroundColor3=CV bd.Text="✕" bd.TextSize=13 bd.Font=Enum.Font.GothamBold bd.TextColor3=CTE
+        bd.BorderSizePixel=0 bd.Parent=ct bd.AutoButtonColor=false
+        Instance.new("UICorner",bd).CornerRadius=UDim.new(0,5)
+        bd.MouseButton1Click:Connect(function()
+            coordenadas[nome]=nil SalvarCoord(coordenadas) AtualLista()
+            if estadoSistema.coordenadaSelecionada==nome then lblSel.Text="Nenhuma coordenada selecionada" estadoSistema.alvoAtual=nil estadoSistema.coordenadaSelecionada=nil end
+        end)
+    end
+    scrollList.CanvasSize=UDim2.new(0,0,0,cnt*33)
+end
+btnSave.MouseButton1Click:Connect(function()
+    if tbox.Text=="" or not Root then Notify("Digite um nome","warn") return end
+    local n=tbox.Text coordenadas[n]={x=Root.Position.X,y=Root.Position.Y,z=Root.Position.Z}
+    SalvarCoord(coordenadas) AtualLista() tbox.Text="" Notify("Salvo: "..n,"ok")
+end)
+
+local lblCurva=Instance.new("TextLabel")
+lblCurva.Text="FORÇA DA CURVA: "..string.format("%.2f",FORCA_CURVA) lblCurva.TextSize=11
+lblCurva.Font=Enum.Font.GothamSemibold lblCurva.TextColor3=CT lblCurva.BackgroundTransparency=1
+lblCurva.Size=UDim2.new(1,-8,0,18) lblCurva.Position=UDim2.new(0,4,0,y)
+lblCurva.TextXAlignment=Enum.TextXAlignment.Left lblCurva.Parent=content y=y+22
+
+local bCM=Instance.new("TextButton") bCM.Size=UDim2.new(0,40,0,28) bCM.Position=UDim2.new(0,4,0,y)
+bCM.BackgroundColor3=CP bCM.Text="−" bCM.TextSize=18 bCM.Font=Enum.Font.GothamBold bCM.TextColor3=CV
+bCM.BorderSizePixel=0 bCM.Parent=content Instance.new("UICorner",bCM).CornerRadius=UDim.new(0,6)
+local bCP=bCM:Clone() bCP.Position=UDim2.new(0,50,0,y) bCP.Text="+" bCP.Parent=content y=y+36
+bCM.MouseButton1Click:Connect(function() FORCA_CURVA=math.clamp(FORCA_CURVA-0.05,0.30,1.20) lblCurva.Text="FORÇA DA CURVA: "..string.format("%.2f",FORCA_CURVA) end)
+bCP.MouseButton1Click:Connect(function() FORCA_CURVA=math.clamp(FORCA_CURVA+0.05,0.30,1.20) lblCurva.Text="FORÇA DA CURVA: "..string.format("%.2f",FORCA_CURVA) end)
+
+local lblDist=Instance.new("TextLabel")
+lblDist.Text="INÍCIO DA CURVA: "..DIST_INICIO_CURVA.." studs" lblDist.TextSize=11
+lblDist.Font=Enum.Font.GothamSemibold lblDist.TextColor3=CT lblDist.BackgroundTransparency=1
+lblDist.Size=UDim2.new(1,-8,0,18) lblDist.Position=UDim2.new(0,4,0,y)
+lblDist.TextXAlignment=Enum.TextXAlignment.Left lblDist.Parent=content y=y+22
+local bDM=bCM:Clone() bDM.Parent=content bDM.Position=UDim2.new(0,4,0,y)
+local bDP=bCP:Clone() bDP.Parent=content bDP.Position=UDim2.new(0,50,0,y) y=y+40
+bDM.MouseButton1Click:Connect(function() DIST_INICIO_CURVA=math.clamp(DIST_INICIO_CURVA-4,20,90) lblDist.Text="INÍCIO DA CURVA: "..DIST_INICIO_CURVA.." studs" end)
+bDP.MouseButton1Click:Connect(function() DIST_INICIO_CURVA=math.clamp(DIST_INICIO_CURVA+4,20,90) lblDist.Text="INÍCIO DA CURVA: "..DIST_INICIO_CURVA.." studs" end)
+
+local lblLista=Instance.new("TextLabel")
+lblLista.Text="COORDENADAS SALVAS" lblLista.TextSize=11 lblLista.Font=Enum.Font.GothamBold
+lblLista.TextColor3=CV lblLista.BackgroundTransparency=1 lblLista.Size=UDim2.new(1,-8,0,18)
+lblLista.Position=UDim2.new(0,4,0,y) lblLista.TextXAlignment=Enum.TextXAlignment.Left lblLista.Parent=content y=y+22
+
+listaFrame.Size=UDim2.new(1,-8,0,160) listaFrame.Position=UDim2.new(0,4,0,y)
+listaFrame.BackgroundColor3=CP listaFrame.BorderSizePixel=0 listaFrame.Parent=content
+Instance.new("UICorner",listaFrame).CornerRadius=UDim.new(0,6) Instance.new("UIStroke",listaFrame).Color=CV
+
+scrollList=Instance.new("ScrollingFrame")
+scrollList.Size=UDim2.new(1,-4,1,-4) scrollList.Position=UDim2.new(0,2,0,2)
+scrollList.BackgroundTransparency=1 scrollList.BorderSizePixel=0 scrollList.ScrollBarThickness=3
+scrollList.ScrollBarImageColor3=CV scrollList.CanvasSize=UDim2.new(0,0,0,0) scrollList.Parent=listaFrame
+local lay=Instance.new("UIListLayout") lay.Parent=scrollList lay.Padding=UDim.new(0,3) lay.SortOrder=Enum.SortOrder.LayoutOrder
+AtualLista()
+
+local function ToggleFollow()
+    AutoFollowEnabled=not AutoFollowEnabled
+    if AutoFollowEnabled then
+        btnFloatFollow.BackgroundColor3=CV btnFloatFollow.Text="F:ON" btnFloatFollow.TextColor3=CTE sFollow.Color=CV Notify("Follow ON","ok")
+    else
+        btnFloatFollow.BackgroundColor3=CP btnFloatFollow.Text="F:OFF" btnFloatFollow.TextColor3=CT sFollow.Color=Color3.fromRGB(160,160,160)
+        if Hum then Hum:Move(Vector3.zero,false) end Notify("Follow OFF","info")
+    end
+end
+btnFloatFollow.MouseButton1Click:Connect(ToggleFollow)
+
+local function ToggleSkill()
+    SkillModeEnabled=not SkillModeEnabled
+    if SkillModeEnabled then
+        skillPhase=0 skillTimer=0 btnFloatSkill.BackgroundColor3=CV btnFloatSkill.Text="SK:ON"
+        btnFloatSkill.TextColor3=CTE sSkill.Color=CV Notify("Skill ON","ok")
+    else
+        btnFloatSkill.BackgroundColor3=CP btnFloatSkill.Text="SK:OFF" btnFloatSkill.TextColor3=CT sSkill.Color=Color3.fromRGB(160,160,160) Notify("Skill OFF","info")
+    end
+end
+btnFloatSkill.MouseButton1Click:Connect(ToggleSkill)
+
+local function ToggleReach()
+    ReachEnabled=not ReachEnabled
+    if ReachEnabled then
+        btnFloatReach.BackgroundColor3=CV btnFloatReach.Text="R:ON" btnFloatReach.TextColor3=CTE sReach.Color=CV Notify("Reach ON | "..ReachValue,"ok")
+    else
+        btnFloatReach.BackgroundColor3=CP btnFloatReach.Text="R:OFF" btnFloatReach.TextColor3=CT sReach.Color=Color3.fromRGB(160,160,160)
+        if reachVis then reachVis.Transparency=1 end Notify("Reach OFF","info")
+    end
+end
+btnFloatReach.MouseButton1Click:Connect(ToggleReach)
+
+local function AtualVisFloat()
+    if StealthMode then
+        btnMaster.Visible=false btnFloatToggle.Visible=false btnFloatFollow.Visible=false
+        btnFloatSkill.Visible=false btnFloatReach.Visible=false btnFloatPass.Visible=false btnFloatAutoCatch.Visible=false return
+    end
+    btnMaster.Visible=floatButtonsVisible.master btnFloatToggle.Visible=floatButtonsVisible.sistema
+    btnFloatFollow.Visible=floatButtonsVisible.follow btnFloatSkill.Visible=floatButtonsVisible.skill
+    btnFloatReach.Visible=floatButtonsVisible.reach btnFloatPass.Visible=floatButtonsVisible.pass
+    btnFloatAutoCatch.Visible=AutoCatchFloatVisible and floatButtonsVisible.master
+end
+local function UpdateACFloat()
+    if not btnFloatAutoCatch then return end
+    local on=GoalkeeperAutoCatch
+    btnFloatAutoCatch.Visible=AutoCatchFloatVisible and floatButtonsVisible.master and not StealthMode
+    btnFloatAutoCatch.Text=on and "AC:ON" or "AC:OFF"
+    btnFloatAutoCatch.BackgroundColor3=on and CV or CP
+    btnFloatAutoCatch.TextColor3=on and CTE or CT
+    if sAC then sAC.Color=on and CV or Color3.fromRGB(160,160,160) end
+end
+
+-- PASSE UI
+local lblPass=Instance.new("TextLabel")
+lblPass.Text="PASSE INTELIGENTE" lblPass.TextSize=11 lblPass.Font=Enum.Font.GothamBold
+lblPass.TextColor3=CV lblPass.BackgroundTransparency=1 lblPass.Size=UDim2.new(1,-8,0,18)
+lblPass.Position=UDim2.new(0,4,0,y) lblPass.TextXAlignment=Enum.TextXAlignment.Left lblPass.Parent=content y=y+22
+local passBox=Instance.new("TextBox")
+passBox.Size=UDim2.new(1,-8,0,28) passBox.Position=UDim2.new(0,4,0,y)
+passBox.BackgroundColor3=CP passBox.Text="" passBox.PlaceholderText="Nick parcial (ex: dvv)"
+passBox.TextSize=12 passBox.Font=Enum.Font.Gotham passBox.TextColor3=CT
+passBox.PlaceholderColor3=Color3.fromRGB(120,120,120) passBox.ClearTextOnFocus=false passBox.BorderSizePixel=0 passBox.Parent=content
+Instance.new("UICorner",passBox).CornerRadius=UDim.new(0,6) Instance.new("UIStroke",passBox).Color=Color3.fromRGB(80,80,80) y=y+34
+local lblPT=Instance.new("TextLabel")
+lblPT.Text="Alvo: automático (mais livre)" lblPT.TextSize=10 lblPT.Font=Enum.Font.Gotham
+lblPT.TextColor3=Color3.fromRGB(180,180,180) lblPT.BackgroundTransparency=1
+lblPT.Size=UDim2.new(1,-8,0,16) lblPT.Position=UDim2.new(0,4,0,y)
+lblPT.TextXAlignment=Enum.TextXAlignment.Left lblPT.Parent=content y=y+20
+local function RefreshPT()
+    PassNickFilter=(passBox.Text or ""):gsub("^%s+",""):gsub("%s+$","")
+    if PassNickFilter=="" then lblPT.Text="Alvo: automático (mais livre)" return end
+    local p,s,ms=FindByNick(PassNickFilter)
+    if p then lblPT.Text="Alvo: "..AllyName(p) lblPT.TextColor3=Color3.fromRGB(80,255,120)
+    elseif s=="multiplos" then
+        local ns={} for i,m in ipairs(ms or {}) do if i<=3 then table.insert(ns,AllyName(m)) end end
+        lblPT.Text="Vários: "..table.concat(ns,", ") lblPT.TextColor3=Color3.fromRGB(255,180,40)
+    else lblPT.Text="Nenhum jogador com \""..PassNickFilter.."\"" lblPT.TextColor3=Color3.fromRGB(255,80,80) end
+end
+passBox:GetPropertyChangedSignal("Text"):Connect(RefreshPT)
+passBox.FocusLost:Connect(RefreshPT)
+
+local btnPass=Instance.new("TextButton")
+btnPass.Size=UDim2.new(1,-8,0,30) btnPass.Position=UDim2.new(0,4,0,y)
+btnPass.BackgroundColor3=CP btnPass.Text="Passe Inteligente: OFF" btnPass.TextSize=12
+btnPass.Font=Enum.Font.GothamBold btnPass.TextColor3=CT btnPass.BorderSizePixel=0 btnPass.Parent=content
+btnPass.AutoButtonColor=false Instance.new("UICorner",btnPass).CornerRadius=UDim.new(0,6)
+Instance.new("UIStroke",btnPass).Color=CV y=y+40
+local function AtualPass()
+    if PassEnabled then
+        btnPass.Text="Passe Inteligente: ON" btnPass.BackgroundColor3=CV btnPass.TextColor3=CTE
+        btnFloatPass.BackgroundColor3=CV btnFloatPass.Text="P:ON" btnFloatPass.TextColor3=CTE sPass.Color=CV
+    else
+        btnPass.Text="Passe Inteligente: OFF" btnPass.BackgroundColor3=CP btnPass.TextColor3=CT
+        btnFloatPass.BackgroundColor3=CP btnFloatPass.Text="P:OFF" btnFloatPass.TextColor3=CT sPass.Color=Color3.fromRGB(160,160,160)
+    end
+end
+local function TogglePass()
+    PassNickFilter=(passBox.Text or ""):gsub("^%s+",""):gsub("%s+$","")
+    if not PassEnabled then
+        if PassNickFilter~="" then
+            local p,s=FindByNick(PassNickFilter)
+            if s=="nenhum" then Notify("Nick não encontrado","warn") return end
+            if s=="multiplos" then Notify("Vários nicks","warn") return end
+            PassTargetPlayer=p Notify("Travado em "..AllyName(p),"ok")
+        else PassTargetPlayer=nil Notify("Passe no aliado mais livre","ok") end
+        PassEnabled=true PassGuiaAtivo=false PassToolTrg=false
+    else
+        PassEnabled=false PassGuiaAtivo=false PassChegou=false PassContandoParada=0 PassTargetPlayer=nil PassToolTrg=false
+        Notify("Passe OFF","info")
+    end
+    AtualPass()
+end
+btnPass.MouseButton1Click:Connect(TogglePass)
+btnFloatPass.MouseButton1Click:Connect(TogglePass)
+
+local btnSpawn=Instance.new("TextButton")
+btnSpawn.Size=UDim2.new(1,-8,0,28) btnSpawn.Position=UDim2.new(0,4,0,y)
+btnSpawn.BackgroundColor3=CP btnSpawn.Text="🤖 Spawn Robô Teste" btnSpawn.TextSize=11
+btnSpawn.Font=Enum.Font.GothamBold btnSpawn.TextColor3=CT btnSpawn.BorderSizePixel=0 btnSpawn.Parent=content
+btnSpawn.AutoButtonColor=false Instance.new("UICorner",btnSpawn).CornerRadius=UDim.new(0,6)
+Instance.new("UIStroke",btnSpawn).Color=Color3.fromRGB(80,255,120) y=y+32
+btnSpawn.MouseButton1Click:Connect(function()
+    SpawnBot() if passBox then passBox.Text="robo" RefreshPT() end
+end)
+local btnRem=Instance.new("TextButton")
+btnRem.Size=UDim2.new(1,-8,0,28) btnRem.Position=UDim2.new(0,4,0,y)
+btnRem.BackgroundColor3=CP btnRem.Text="Remover Robô" btnRem.TextSize=11 btnRem.Font=Enum.Font.Gotham
+btnRem.TextColor3=CT btnRem.BorderSizePixel=0 btnRem.Parent=content btnRem.AutoButtonColor=false
+Instance.new("UICorner",btnRem).CornerRadius=UDim.new(0,6) y=y+40
+btnRem.MouseButton1Click:Connect(function() DestroyBot() Notify("Robô removido","info") RefreshPT() end)
+
+local lblKeys=Instance.new("TextLabel")
+lblKeys.Text="TECLAS (KEYBINDS)" lblKeys.TextSize=11 lblKeys.Font=Enum.Font.GothamBold
+lblKeys.TextColor3=CV lblKeys.BackgroundTransparency=1 lblKeys.Size=UDim2.new(1,-8,0,18)
+lblKeys.Position=UDim2.new(0,4,0,y) lblKeys.TextXAlignment=Enum.TextXAlignment.Left lblKeys.Parent=content y=y+22
+
+btnKeyFollow=Instance.new("TextButton")
+btnKeyFollow.Size=UDim2.new(1,-8,0,30) btnKeyFollow.Position=UDim2.new(0,4,0,y)
+btnKeyFollow.BackgroundColor3=CP btnKeyFollow.Text="Tecla Follow: "..KeyName(FOLLOW_KEY)
+btnKeyFollow.TextSize=12 btnKeyFollow.Font=Enum.Font.GothamBold btnKeyFollow.TextColor3=CT
+btnKeyFollow.BorderSizePixel=0 btnKeyFollow.Parent=content btnKeyFollow.AutoButtonColor=false
+Instance.new("UICorner",btnKeyFollow).CornerRadius=UDim.new(0,6) Instance.new("UIStroke",btnKeyFollow).Color=CV y=y+36
+btnKeyFollow.MouseButton1Click:Connect(function()
+    waitingKeybind="follow" btnKeyFollow.Text="Pressione uma tecla..." btnKeyFollow.BackgroundColor3=CV btnKeyFollow.TextColor3=CTE
+    task.delay(5,function() if waitingKeybind=="follow" then waitingKeybind=nil btnKeyFollow.Text="Tecla Follow: "..KeyName(FOLLOW_KEY) btnKeyFollow.BackgroundColor3=CP btnKeyFollow.TextColor3=CT end end)
+end)
+btnKeyStealth=Instance.new("TextButton")
+btnKeyStealth.Size=UDim2.new(1,-8,0,30) btnKeyStealth.Position=UDim2.new(0,4,0,y)
+btnKeyStealth.BackgroundColor3=CP btnKeyStealth.Text="Tecla Furtivo: "..KeyName(STEALTH_KEY)
+btnKeyStealth.TextSize=12 btnKeyStealth.Font=Enum.Font.GothamBold btnKeyStealth.TextColor3=CT
+btnKeyStealth.BorderSizePixel=0 btnKeyStealth.Parent=content btnKeyStealth.AutoButtonColor=false
+Instance.new("UICorner",btnKeyStealth).CornerRadius=UDim.new(0,6) Instance.new("UIStroke",btnKeyStealth).Color=CV y=y+40
+btnKeyStealth.MouseButton1Click:Connect(function()
+    waitingKeybind="stealth" btnKeyStealth.Text="Pressione uma tecla..." btnKeyStealth.BackgroundColor3=CV btnKeyStealth.TextColor3=CTE
+    task.delay(5,function() if waitingKeybind=="stealth" then waitingKeybind=nil btnKeyStealth.Text="Tecla Furtivo: "..KeyName(STEALTH_KEY) btnKeyStealth.BackgroundColor3=CP btnKeyStealth.TextColor3=CT end end)
+end)
+
+local btnKill=Instance.new("TextButton")
+btnKill.Size=UDim2.new(1,-8,0,36) btnKill.Position=UDim2.new(0,4,0,y)
+btnKill.BackgroundColor3=Color3.fromRGB(180,30,30) btnKill.Text="⛔ DESATIVAR SCRIPT COMPLETO"
+btnKill.TextSize=12 btnKill.Font=Enum.Font.GothamBold btnKill.TextColor3=CT
+btnKill.BorderSizePixel=0 btnKill.Parent=content btnKill.AutoButtonColor=false
+Instance.new("UICorner",btnKill).CornerRadius=UDim.new(0,6) y=y+44
+btnKill.MouseButton1Click:Connect(DesativarTudo)
+content.Size=UDim2.new(1,-4,0,y+8) scroll.CanvasSize=UDim2.new(0,0,0,y+8)
+
+-- GOLEIRO
+local gy=4
+local function MakeGKToggle(txt,get,set)
+    local b=Instance.new("TextButton") b.Size=UDim2.new(1,-8,0,30) b.Position=UDim2.new(0,4,0,gy)
+    b.BackgroundColor3=get() and CV or CP b.Text=txt..(get() and ": ON" or ": OFF")
+    b.TextSize=11 b.Font=Enum.Font.GothamBold b.TextColor3=get() and CTE or CT
+    b.BorderSizePixel=0 b.AutoButtonColor=false b.Parent=gContent
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,6) Instance.new("UIStroke",b).Color=CV
+    b.MouseButton1Click:Connect(function()
+        set(not get()) local on=get()
+        b.Text=txt..(on and ": ON" or ": OFF") b.BackgroundColor3=on and CV or CP b.TextColor3=on and CTE or CT
+        if txt=="Auto Catch" then UpdateACFloat() end
+        Notify(txt..(on and " ON" or " OFF"),on and "ok" or "info")
+    end)
+    gy=gy+36 return b
+end
+
+local lblG=Instance.new("TextLabel")
+lblG.Text="🧤 FUNÇÕES DE GOLEIRO" lblG.TextSize=11 lblG.Font=Enum.Font.GothamBold
+lblG.TextColor3=CV lblG.BackgroundTransparency=1 lblG.Size=UDim2.new(1,-8,0,18)
+lblG.Position=UDim2.new(0,4,0,gy) lblG.TextXAlignment=Enum.TextXAlignment.Left lblG.Parent=gContent gy=gy+24
+
+local lblTeam=Instance.new("TextLabel")
+lblTeam.Text="Time detectado: "..tostring(GetLocalSide() or "automático") lblTeam.TextSize=10
+lblTeam.Font=Enum.Font.Gotham lblTeam.TextColor3=CT lblTeam.BackgroundTransparency=1
+lblTeam.Size=UDim2.new(1,-8,0,18) lblTeam.Position=UDim2.new(0,4,0,gy)
+lblTeam.TextXAlignment=Enum.TextXAlignment.Left lblTeam.Parent=gContent gy=gy+24
+
+MakeGKToggle("Goleiro",function() return GoalkeeperEnabled end,function(v) GoalkeeperEnabled=v end)
+MakeGKToggle("Auto Catch",function() return GoalkeeperAutoCatch end,function(v) GoalkeeperAutoCatch=v end)
+MakeGKToggle("Posicionamento",function() return GoalkeeperAutoPosition end,function(v) GoalkeeperAutoPosition=v end)
+MakeGKToggle("Interceptação",function() return GoalkeeperIntercept end,function(v) GoalkeeperIntercept=v end)
+MakeGKToggle("Hitbox visual",function() return GoalkeeperHitboxEnabled end,function(v) GoalkeeperHitboxEnabled=v end)
+
+local lblCR=Instance.new("TextLabel")
+lblCR.Text="RAIO AUTO CATCH: "..string.format("%.1f",GoalkeeperCatchRange).." / "..GoalkeeperCatchRangeMax
+lblCR.TextSize=11 lblCR.Font=Enum.Font.GothamSemibold lblCR.TextColor3=CT
+lblCR.BackgroundTransparency=1 lblCR.Size=UDim2.new(1,-8,0,18)
+lblCR.Position=UDim2.new(0,4,0,gy) lblCR.TextXAlignment=Enum.TextXAlignment.Left lblCR.Parent=gContent gy=gy+22
+
+local gMinus=Instance.new("TextButton")
+gMinus.Size=UDim2.new(0,40,0,28) gMinus.Position=UDim2.new(0,4,0,gy)
+gMinus.BackgroundColor3=CP gMinus.Text="−" gMinus.TextSize=18 gMinus.Font=Enum.Font.GothamBold
+gMinus.TextColor3=CV gMinus.BorderSizePixel=0 gMinus.Parent=gContent
+Instance.new("UICorner",gMinus).CornerRadius=UDim.new(0,6)
+local gPlus=gMinus:Clone() gPlus.Position=UDim2.new(0,50,0,gy) gPlus.Text="+" gPlus.Parent=gContent gy=gy+38
+gMinus.MouseButton1Click:Connect(function() GoalkeeperCatchRange=math.clamp(GoalkeeperCatchRange-GoalkeeperCatchRangeStep,3,GoalkeeperCatchRangeMax) lblCR.Text="RAIO AUTO CATCH: "..string.format("%.1f",GoalkeeperCatchRange).." / "..GoalkeeperCatchRangeMax end)
+gPlus.MouseButton1Click:Connect(function() GoalkeeperCatchRange=math.clamp(GoalkeeperCatchRange+GoalkeeperCatchRangeStep,3,GoalkeeperCatchRangeMax) lblCR.Text="RAIO AUTO CATCH: "..string.format("%.1f",GoalkeeperCatchRange).." / "..GoalkeeperCatchRangeMax end)
+
+local lblA=Instance.new("TextLabel")
+lblA.Text="🎯 CHUTE BLUE / GREEN" lblA.TextSize=11 lblA.Font=Enum.Font.GothamBold
+lblA.TextColor3=CV lblA.BackgroundTransparency=1 lblA.Size=UDim2.new(1,-8,0,18)
+lblA.Position=UDim2.new(0,4,0,gy) lblA.TextXAlignment=Enum.TextXAlignment.Left lblA.Parent=gContent gy=gy+24
+
+MakeGKToggle("Aimbot Blue",function() return AimbotBlueEnabled end,function(v) AimbotBlueEnabled=v if v then AimbotGreenEnabled=false end end)
+MakeGKToggle("Aimbot Green",function() return AimbotGreenEnabled end,function(v) AimbotGreenEnabled=v if v then AimbotBlueEnabled=false end end)
+
+local lblAS=Instance.new("TextLabel")
+lblAS.Text="FORÇA DO CHUTE: "..string.format("%.2f",AimbotStrength) lblAS.TextSize=11
+lblAS.Font=Enum.Font.GothamSemibold lblAS.TextColor3=CT lblAS.BackgroundTransparency=1
+lblAS.Size=UDim2.new(1,-8,0,18) lblAS.Position=UDim2.new(0,4,0,gy)
+lblAS.TextXAlignment=Enum.TextXAlignment.Left lblAS.Parent=gContent gy=gy+22
+
+local aM=gMinus:Clone() aM.Parent=gContent aM.Position=UDim2.new(0,4,0,gy)
+local aP=gPlus:Clone() aP.Parent=gContent aP.Position=UDim2.new(0,50,0,gy) gy=gy+40
+aM.MouseButton1Click:Connect(function() AimbotStrength=math.clamp(AimbotStrength-0.05,0.10,0.80) lblAS.Text="FORÇA DO CHUTE: "..string.format("%.2f",AimbotStrength) end)
+aP.MouseButton1Click:Connect(function() AimbotStrength=math.clamp(AimbotStrength+0.05,0.10,0.80) lblAS.Text="FORÇA DO CHUTE: "..string.format("%.2f",AimbotStrength) end)
+
+local btnACVis=Instance.new("TextButton")
+btnACVis.Size=UDim2.new(1,-8,0,30) btnACVis.Position=UDim2.new(0,4,0,gy)
+btnACVis.BackgroundColor3=AutoCatchFloatVisible and CV or CP
+btnACVis.Text=AutoCatchFloatVisible and "Botão Auto Catch: VISÍVEL" or "Botão Auto Catch: ESCONDIDO"
+btnACVis.TextSize=11 btnACVis.Font=Enum.Font.GothamBold btnACVis.TextColor3=AutoCatchFloatVisible and CTE or CT
+btnACVis.BorderSizePixel=0 btnACVis.AutoButtonColor=false btnACVis.Parent=gContent
+Instance.new("UICorner",btnACVis).CornerRadius=UDim.new(0,6) Instance.new("UIStroke",btnACVis).Color=CV gy=gy+36
+btnACVis.MouseButton1Click:Connect(function()
+    AutoCatchFloatVisible=not AutoCatchFloatVisible UpdateACFloat()
+    local v=AutoCatchFloatVisible btnACVis.Text=v and "Botão Auto Catch: VISÍVEL" or "Botão Auto Catch: ESCONDIDO"
+    btnACVis.BackgroundColor3=v and CV or CP btnACVis.TextColor3=v and CTE or CT
+    Notify("Botão AC "..(v and "visível" or "escondido"),v and "ok" or "info")
+end)
+
+local lblAL=Instance.new("TextLabel")
+lblAL.Text="ANTI-LAG" lblAL.TextSize=11 lblAL.Font=Enum.Font.GothamBold
+lblAL.TextColor3=CV lblAL.BackgroundTransparency=1 lblAL.Size=UDim2.new(1,-8,0,18)
+lblAL.Position=UDim2.new(0,4,0,gy) lblAL.TextXAlignment=Enum.TextXAlignment.Left lblAL.Parent=gContent gy=gy+22
+
+local profiles={"quality","balanced","performance"} curProf=2
+local btnAL=Instance.new("TextButton")
+btnAL.Size=UDim2.new(1,-8,0,30) btnAL.Position=UDim2.new(0,4,0,gy)
+btnAL.BackgroundColor3=CP btnAL.Text="Perfil: "..profiles[curProf] btnAL.TextSize=12
+btnAL.Font=Enum.Font.GothamBold btnAL.TextColor3=CT btnAL.BorderSizePixel=0 btnAL.Parent=gContent
+btnAL.AutoButtonColor=false Instance.new("UICorner",btnAL).CornerRadius=UDim.new(0,6)
+Instance.new("UIStroke",btnAL).Color=CV gy=gy+36
+btnAL.MouseButton1Click:Connect(function()
+    curProf=(curProf%#profiles)+1 local p=profiles[curProf] AplicAntiLag(p) btnAL.Text="Perfil: "..p
+end)
+
+local btnStealth=Instance.new("TextButton")
+btnStealth.Size=UDim2.new(1,-8,0,30) btnStealth.Position=UDim2.new(0,4,0,gy)
+btnStealth.BackgroundColor3=CP btnStealth.Text="Modo Furtivo: OFF" btnStealth.TextSize=12
+btnStealth.Font=Enum.Font.GothamBold btnStealth.TextColor3=CT btnStealth.BorderSizePixel=0 btnStealth.Parent=gContent
+btnStealth.AutoButtonColor=false Instance.new("UICorner",btnStealth).CornerRadius=UDim.new(0,6)
+Instance.new("UIStroke",btnStealth).Color=CV gy=gy+36
+
+local btnExit=Instance.new("TextButton")
+btnExit.Size=UDim2.new(0,36,0,36) btnExit.Position=UDim2.new(1,-46,0,10)
+btnExit.BackgroundColor3=Color3.fromRGB(20,20,20) btnExit.BackgroundTransparency=0.55 btnExit.Text="👁"
+btnExit.TextSize=14 btnExit.Font=Enum.Font.GothamBold btnExit.TextColor3=Color3.fromRGB(200,200,200)
+btnExit.TextTransparency=0.35 btnExit.BorderSizePixel=0 btnExit.Visible=false btnExit.ZIndex=100 btnExit.Parent=ScreenGui
+btnExit.AutoButtonColor=false Instance.new("UICorner",btnExit).CornerRadius=UDim.new(1,0) MakeDrag(btnExit)
+
+local function AtualStealthUI()
+    local on=StealthMode
+    btnStealth.Text=on and "Modo Furtivo: ON" or "Modo Furtivo: OFF"
+    btnStealth.BackgroundColor3=on and CV or CP btnStealth.TextColor3=on and CTE or CT
+end
+local function AtivarStealth()
+    if StealthMode then return end StealthMode=true
+    stealthSaved.panelVisible=panel.Visible stealthSaved.espEnabled=EspBallEnabled stealthSaved.reachVis=ReachVisualizerOn
+    panel.Visible=false btnMaster.Visible=false btnFloatToggle.Visible=false btnFloatFollow.Visible=false
+    btnFloatSkill.Visible=false btnFloatReach.Visible=false btnFloatPass.Visible=false btnFloatAutoCatch.Visible=false
+    EspBallEnabled=false ClearAllEsp() ClearPred()
+    if reachVis and reachVis.Parent then reachVis.Transparency=1 end
+    btnExit.Visible=true AtualStealthUI() Notify("Furtivo ON","warn")
+end
+local function DesativarStealth()
+    if not StealthMode then return end StealthMode=false
+    EspBallEnabled=stealthSaved.espEnabled ReachVisualizerOn=stealthSaved.reachVis
+    AtualVisFloat() panel.Visible=stealthSaved.panelVisible btnExit.Visible=false
+    AtualStealthUI() Notify("Furtivo OFF","info")
+end
+local function ToggleStealth() if StealthMode then DesativarStealth() else AtivarStealth() end end
+btnExit.MouseButton1Click:Connect(DesativarStealth)
+btnStealth.MouseButton1Click:Connect(function() ToggleStealth() AtualStealthUI() end)
+
+UIS.InputBegan:Connect(function(input,gp)
+    if waitingKeybind and input.UserInputType==Enum.UserInputType.Keyboard then
+        local k=input.KeyCode
+        if k~=Enum.KeyCode.Unknown then
+            if waitingKeybind=="follow" then
+                FOLLOW_KEY=k if btnKeyFollow then btnKeyFollow.Text="Tecla Follow: "..KeyName(FOLLOW_KEY) btnKeyFollow.BackgroundColor3=CP btnKeyFollow.TextColor3=CT end
+                Notify("Tecla Follow: "..KeyName(FOLLOW_KEY),"ok")
+            elseif waitingKeybind=="stealth" then
+                STEALTH_KEY=k if btnKeyStealth then btnKeyStealth.Text="Tecla Furtivo: "..KeyName(STEALTH_KEY) btnKeyStealth.BackgroundColor3=CP btnKeyStealth.TextColor3=CT end
+                Notify("Tecla Furtivo: "..KeyName(STEALTH_KEY),"ok")
+            end waitingKeybind=nil
+        end return
+    end
+    if gp then return end
+    if input.KeyCode==FOLLOW_KEY then if not StealthMode then ToggleFollow() end
+    elseif input.KeyCode==STEALTH_KEY then ToggleStealth() end
+end)
+
+local function MostrarPainel()
+    panel.Visible=not panel.Visible if not StealthMode then btnMaster.Visible=true end
+end
+btnMaster.MouseButton1Click:Connect(MostrarPainel)
+btnHide.MouseButton1Click:Connect(function() panel.Visible=false if not StealthMode then btnMaster.Visible=true end end)
+
+-- toggles de visibilidade
+local function criarToggleVis(nome,chave,ypos,parent)
+    local b=Instance.new("TextButton") b.Size=UDim2.new(1,-8,0,28) b.Position=UDim2.new(0,4,0,ypos)
+    b.BackgroundColor3=CP b.Text=nome..": VISÍVEL" b.TextSize=11 b.Font=Enum.Font.Gotham
+    b.TextColor3=CT b.BorderSizePixel=0 b.Parent=parent or content b.AutoButtonColor=false
+    Instance.new("UICorner",b).CornerRadius=UDim.new(0,5) Instance.new("UIStroke",b).Color=Color3.fromRGB(80,80,80)
+    b.MouseButton1Click:Connect(function()
+        floatButtonsVisible[chave]=not floatButtonsVisible[chave] AtualVisFloat()
+        b.Text=nome..(floatButtonsVisible[chave] and ": VISÍVEL" or ": OCULTO")
+        b.BackgroundColor3=floatButtonsVisible[chave] and CP or Color3.fromRGB(40,20,20)
+    end)
+    return b
+end
+criarToggleVis("Botão ⚙ (Menu)","master",gy,gContent) gy=gy+32
+criarToggleVis("Botão Sistema","sistema",gy,gContent) gy=gy+32
+criarToggleVis("Botão Follow","follow",gy,gContent) gy=gy+32
+criarToggleVis("Botão Skill","skill",gy,gContent) gy=gy+32
+criarToggleVis("Botão Reach","reach",gy,gContent) gy=gy+32
+criarToggleVis("Botão Passe","pass",gy,gContent) gy=gy+40
+
+gContent.Size=UDim2.new(1,-4,0,gy+8) gScroll.CanvasSize=UDim2.new(0,0,0,gy+8)
+
+SetTab("campo") AtualVisFloat() UpdateACFloat()
+Notify("HUB carregado — todos os módulos ativos","ok")
